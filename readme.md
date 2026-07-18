@@ -1252,7 +1252,7 @@ Tenant Service
 User Service
 Rule Service
 Notification Service
-AI Service
+AI Service (NestJS -- calls OpenAI / Claude / Gemini)
 Template Service
 Channel Service
 Analytics Service
@@ -1262,6 +1262,9 @@ Audit Service
                 RabbitMQ / Kafka
                         │
                Async Event Processing
+                        │
+                        ▼
+        Prediction Service (Python -- XGBoost / PyTorch / TensorFlow)
 ```
 
 ---
@@ -1492,13 +1495,67 @@ Responsibilities
 
 ## AI Service
 
+Calls AI models. Does not train them.
+
 Responsibilities
 
-* LLM
+* Event processing (orchestration)
+* Rule evaluation orchestration
+* Notification orchestration
+* AI summarization
+* AI recommendations
 * Prompt orchestration
-* Severity prediction
 * Duplicate detection
-* Summaries
+
+Since this service calls external LLM providers (OpenAI / Claude / Gemini) rather than
+training or serving its own models, **Node.js (NestJS) is sufficient** -- it stays
+consistent with the rest of the platform's services instead of introducing a second
+runtime for what is fundamentally I/O-bound orchestration.
+
+---
+
+## Prediction Service
+
+A dedicated **Python** ML service, separate from the AI Service above.
+
+Where the AI Service calls someone else's model, the Prediction Service trains and
+serves ours.
+
+Responsibilities
+
+* Fraud detection
+* Demand forecasting
+* Time series models
+* Computer vision
+* Recommendation engines
+
+Uses Python's ML ecosystem:
+
+* XGBoost
+* PyTorch
+* TensorFlow
+
+```text
+        API Gateway
+             │
+─────────────────────────────
+Auth
+Tenant
+Event
+Notification
+AI (NestJS)
+─────────────────────────────
+             │
+             ▼
+ OpenAI / Claude / Gemini
+
+─────────────────────────────
+Prediction Service (Python)
+─────────────────────────────
+             │
+             ▼
+ XGBoost / PyTorch / TensorFlow
+```
 
 ---
 
@@ -1582,6 +1639,7 @@ Completely asynchronous.
 | Event Service        | AI Service           | RabbitMQ                | Async AI processing    |
 | Event Service        | Rule Service         | RabbitMQ                | Decoupled processing   |
 | AI Service           | Notification Service | RabbitMQ                | Publish analyzed event |
+| AI Service           | Prediction Service   | gRPC                    | Request a prediction   |
 | Rule Service         | Notification Service | RabbitMQ                | Notification commands  |
 | Notification Service | Email Connector      | gRPC                    | Immediate send request |
 | Notification Service | Slack Connector      | gRPC                    | Immediate send request |
@@ -1692,11 +1750,11 @@ RabbitMQ
 
 ↓
 
-AI Worker
+AI Service (NestJS)
 
 ↓
 
-LLM
+OpenAI / Claude / Gemini
 
 ↓
 
@@ -1712,6 +1770,30 @@ Notification Service
 ```
 
 This prevents slow LLM calls from delaying event ingestion.
+
+When the AI Service needs a prediction rather than a generative response (fraud score,
+demand forecast, anomaly likelihood), it calls the Prediction Service over gRPC instead
+of an LLM provider:
+
+```
+AI Service (NestJS)
+
+↓ gRPC
+
+Prediction Service (Python)
+
+↓
+
+XGBoost / PyTorch / TensorFlow
+
+↓
+
+Prediction Response
+```
+
+The two are separate services because they scale and fail differently: the AI Service
+is bound by third-party LLM API latency and rate limits, while the Prediction Service is
+bound by local model inference and benefits from Python's ML tooling.
 
 ---
 
@@ -1740,6 +1822,10 @@ Kafka can be introduced later for analytics or event streaming without replacing
 * **AI Processing:** Asynchronous via RabbitMQ.
 * **Analytics & Audit:** Consume events asynchronously.
 * **Database:** One database per service with no direct cross-service access.
+* **AI vs. Prediction:** The AI Service (NestJS) orchestrates calls to external LLM
+  providers; the Prediction Service (Python) trains and serves in-house ML models. Two
+  services because they scale and fail differently, not because of a technology
+  preference.
 
 Infrastructure Bootstrap
 
@@ -1748,7 +1834,7 @@ We'll build the actual foundation in this order:
 Initialize the Turborepo with pnpm workspaces.
 Configure shared TypeScript settings, ESLint, Prettier, Husky, and Commitlint.
 Create the shared packages (config, logger, common, grpc, etc.).
-Scaffold the NestJS services and the FastAPI AI service.
+Scaffold the NestJS services (including the AI Service) and the Python Prediction Service.
 Create the initial docker-compose.yml with PostgreSQL, RabbitMQ, Redis, Jaeger, Prometheus, Grafana, PgAdmin, and all application services.
 Verify inter-service communication with a simple health-check flow.
 
