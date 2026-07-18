@@ -1,0 +1,10 @@
+{
+  "name": "@ai-notification/prediction-service",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": ".venv/bin/python -m compileall app",
+    "start": ".venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8011}",
+    "dev": ".venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port ${PORT:-8011}"
+  }
+}
