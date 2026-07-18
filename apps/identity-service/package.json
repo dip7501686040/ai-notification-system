@@ -1,0 +1,29 @@
+{
+  "name": "@ai-notification/identity-service",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "dev": "nest start --watch",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@ai-notification/common": "workspace:*",
+    "@ai-notification/config": "workspace:*",
+    "@ai-notification/logger": "workspace:*",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@ai-notification/typescript-config": "workspace:*",
+    "@nestjs/cli": "^10.4.9",
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}
