@@ -23,6 +23,13 @@
       "prettier --write"
     ]
   },
+  "pnpm": {
+    "overrides": {
+      "@opentelemetry/resources": "1.28.0",
+      "@opentelemetry/sdk-metrics": "1.28.0",
+      "@opentelemetry/semantic-conventions": "1.28.0"
+    }
+  },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
