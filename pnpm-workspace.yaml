@@ -4,3 +4,9 @@ packages:
 
 ignoredBuiltDependencies:
   - protobufjs
+  - "@nestjs/core"
+
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma

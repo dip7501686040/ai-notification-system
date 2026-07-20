@@ -1,8 +1,14 @@
 import "./tracing";
 import "reflect-metadata";
+import path from "node:path";
 import { NestFactory } from "@nestjs/core";
-import type { MicroserviceOptions } from "@nestjs/microservices";
-import { grpcHealthMicroserviceOptions } from "@ai-notification/grpc";
+import { ValidationPipe } from "@nestjs/common";
+import { Transport, type MicroserviceOptions } from "@nestjs/microservices";
+import {
+  grpcHealthMicroserviceOptions,
+  PROTO_DIR,
+  defaultLoaderOptions,
+} from "@ai-notification/grpc";
 import { AppModule } from "./app.module";
 import { createLogger } from "@ai-notification/logger";
 import { env } from "./env";
@@ -11,9 +17,22 @@ async function bootstrap() {
   const logger = createLogger("identity-service");
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
   app.connectMicroservice<MicroserviceOptions>(grpcHealthMicroserviceOptions(env.GRPC_PORT));
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.GRPC,
+    options: {
+      package: "auth.v1",
+      protoPath: path.join(PROTO_DIR, "auth.proto"),
+      url: `0.0.0.0:${env.AUTH_GRPC_PORT}`,
+      loader: defaultLoaderOptions,
+    },
+  });
+
   await app.startAllMicroservices();
   logger.info(`identity-service gRPC health server listening on port ${env.GRPC_PORT}`);
+  logger.info(`identity-service gRPC auth server listening on port ${env.AUTH_GRPC_PORT}`);
 
   await app.listen(env.PORT);
   logger.info(`identity-service listening on port ${env.PORT}`);

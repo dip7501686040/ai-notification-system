@@ -11,7 +11,10 @@
 # APP_DIR must match that app's directory name under apps/.
 
 FROM node:24-alpine AS base
-RUN apk add --no-cache libc6-compat
+# openssl is required for Prisma to correctly detect the runtime libssl
+# version when generating its query engine binary -- without it, Prisma
+# silently guesses wrong and the engine mismatches at runtime.
+RUN apk add --no-cache libc6-compat openssl
 RUN corepack enable
 
 # ---- Prune the monorepo down to just what this app needs ----
@@ -44,4 +47,4 @@ COPY --from=installer /app .
 USER appuser
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
   CMD ["node", "-e", "require('http').get({host:'localhost',port:process.env.PORT||3000,path:'/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
-CMD ["sh", "-c", "node \"apps/$APP_DIR/dist/main.js\""]
+CMD ["sh", "-c", "if [ -f \"apps/$APP_DIR/prisma/schema.prisma\" ]; then \"apps/$APP_DIR/node_modules/.bin/prisma\" migrate deploy --schema=\"apps/$APP_DIR/prisma/schema.prisma\"; fi && node \"apps/$APP_DIR/dist/main.js\""]

@@ -36,7 +36,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      # Host port 5433, not 5432: this machine already runs a native
+      # Postgres on 127.0.0.1:5432 that silently wins the "localhost"
+      # resolution over Docker's port-forward, so 5432:5432 here would
+      # route host clients to the wrong database entirely.
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -156,6 +160,7 @@ services:
     environment:
       <<: *nest-env
       PORT: "8000"
+      IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
     ports:
       - "8000:8000"
 
@@ -169,6 +174,15 @@ services:
     environment:
       <<: *nest-env
       PORT: "8001"
+      AUTH_GRPC_PORT: "50152"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/identity_db
+      JWT_SECRET: dev-only-insecure-jwt-secret-change-in-production
+      JWT_EXPIRES_IN: 1h
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     ports:
       - "8001:8001"
 

@@ -1841,11 +1841,14 @@ Verify inter-service communication with a simple health-check flow.
 This gives us a production-grade development platform before we implement the first business feature. From there, we'll implement the API Gateway and Auth Service end-to-end.
 
 
-Development process
+**Development process**s
+
+Scaffolding
 1. ✅ Turborepo + pnpm workspaces
 2. ✅ Shared TS/ESLint/Prettier/Husky/Commitlint
 3. ✅ Shared packages (config, logger, common, grpc, telemetry)
 4. ✅ NestJS services + Python Prediction Service
+Bootstrapping
 5. ✅ docker-compose.yml with all infra + observability + app services
 6. ✅ Verify inter-service communication with a simple health-check flow.
    Every service (11 NestJS + prediction-service) now runs the standard
@@ -1855,3 +1858,30 @@ Development process
    aggregates their status. Verified live: all report SERVING; stopping
    identity-service made it report UNREACHABLE with the actual gRPC error,
    and it returned to SERVING once restarted.
+
+   "This gives us a production-grade development platform before we implement the first business feature. From there, we'll implement the API Gateway and Auth Service end-to-end."
+
+Features
+7. ✅ API Gateway + Auth Service end-to-end (register/login/JWT/OAuth).
+   identity-service: Prisma + Postgres-backed User model, POST
+   /auth/register, POST /auth/login (bcrypt), GET /auth/me (passport-jwt
+   guard), GET /auth/google + /auth/google/callback (passport-google-oauth20,
+   conditionally registered only when GOOGLE_CLIENT_ID/SECRET are set --
+   no real Google credentials in this environment, so the actual consent-
+   screen round trip is unverified, but register/login/JWT/gRPC are). A
+   second gRPC microservice exposes auth.v1.Auth/ValidateToken. api-gateway's
+   GET /protected/ping demonstrates "API Gateway -> Auth Service: gRPC, Fast
+   auth" from the architecture doc: a guard extracts the bearer token and
+   validates it over real internal gRPC (not local JWT verification).
+
+   Verified live end-to-end, including two real bugs caught only by
+   running it: the Docker CMD ran `node dist/main.js` directly, bypassing
+   package.json's `start` script -- so `prisma migrate deploy` never
+   actually ran in the container (fixed: CMD now runs migrate deploy
+   itself when a prisma/schema.prisma exists); and this machine's native
+   Postgres on 127.0.0.1:5432 silently won the "localhost" resolution over
+   Docker's port-forward, so the first migration attempt landed in the
+   wrong database entirely (fixed: compose Postgres moved to host port
+   5433). Proved the migrate-on-boot fix by dropping identity_db entirely
+   and confirming a fresh container applied the migration itself before
+   serving traffic.
