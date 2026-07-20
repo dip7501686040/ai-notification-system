@@ -1,5 +1,5 @@
 {
-  "extends": "@ai-notification/typescript-config/base.json",
+  "extends": "@ai-notification/typescript-config/library.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",

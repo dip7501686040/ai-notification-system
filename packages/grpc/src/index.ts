@@ -1,11 +1,8 @@
-import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-
-export const PROTO_DIR = path.resolve(currentDir, "..", "proto");
+export const PROTO_DIR = path.resolve(__dirname, "..", "proto");
 
 export type LoadProtoOptions = protoLoader.Options;
 
