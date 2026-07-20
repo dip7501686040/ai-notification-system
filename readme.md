@@ -1839,3 +1839,19 @@ Create the initial docker-compose.yml with PostgreSQL, RabbitMQ, Redis, Jaeger, 
 Verify inter-service communication with a simple health-check flow.
 
 This gives us a production-grade development platform before we implement the first business feature. From there, we'll implement the API Gateway and Auth Service end-to-end.
+
+
+Development process
+1. ✅ Turborepo + pnpm workspaces
+2. ✅ Shared TS/ESLint/Prettier/Husky/Commitlint
+3. ✅ Shared packages (config, logger, common, grpc, telemetry)
+4. ✅ NestJS services + Python Prediction Service
+5. ✅ docker-compose.yml with all infra + observability + app services
+6. ✅ Verify inter-service communication with a simple health-check flow.
+   Every service (11 NestJS + prediction-service) now runs the standard
+   grpc.health.v1.Health service alongside its REST API. api-gateway's
+   GET /internal/service-health calls all 11 other services over real
+   internal gRPC (Docker service DNS, not the host-mapped REST ports) and
+   aggregates their status. Verified live: all report SERVING; stopping
+   identity-service made it report UNREACHABLE with the actual gRPC error,
+   and it returned to SERVING once restarted.

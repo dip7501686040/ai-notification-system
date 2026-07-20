@@ -15,7 +15,11 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.2",
-    "@grpc/proto-loader": "^0.7.13"
+    "@grpc/proto-loader": "^0.7.13",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/microservices": "^10.4.15",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",
