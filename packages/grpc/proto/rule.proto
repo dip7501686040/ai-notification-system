@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package rule.v1;
+
+message RuleMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string event_type = 4;
+  string conditions_json = 5;
+  string actions_json = 6;
+  bool enabled = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message SuccessResponse {
+  bool success = 1;
+}
+
+// enabled_state is "" (defaults to enabled), "true", or "false" -- kept as
+// a string rather than a proto3 bool so "not provided" is distinguishable
+// from an explicit false (proto3 bools default to false when absent).
+message CreateRuleRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string event_type = 4;
+  string conditions_json = 5;
+  string actions_json = 6;
+  string enabled_state = 7;
+}
+
+message ListRulesRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+}
+
+message ListRulesResponse {
+  repeated RuleMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message GetRuleRequest {
+  string requester_id = 1;
+  string rule_id = 2;
+}
+
+// Empty string for name/event_type/conditions_json/actions_json means
+// "leave unchanged"; enabled_state is "" (unchanged), "true", or "false".
+message UpdateRuleRequest {
+  string requester_id = 1;
+  string rule_id = 2;
+  string name = 3;
+  string event_type = 4;
+  string conditions_json = 5;
+  string actions_json = 6;
+  string enabled_state = 7;
+}
+
+message DeleteRuleRequest {
+  string requester_id = 1;
+  string rule_id = 2;
+}
+
+service Rule {
+  rpc CreateRule(CreateRuleRequest) returns (RuleMessage);
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
+  rpc GetRule(GetRuleRequest) returns (RuleMessage);
+  rpc UpdateRule(UpdateRuleRequest) returns (RuleMessage);
+  rpc DeleteRule(DeleteRuleRequest) returns (SuccessResponse);
+}

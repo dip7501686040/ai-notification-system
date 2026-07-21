@@ -1,0 +1,86 @@
+import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import { RabbitMQService } from "@ai-notification/rabbitmq";
+import type { Prisma } from "../../generated/prisma-client";
+import { PrismaService } from "../prisma/prisma.service";
+import { RulesService } from "./rules.service";
+import { evaluate, type Condition } from "./rule-evaluator";
+
+const EVENTS_EXCHANGE = "platform";
+const EVENT_CREATED_ROUTING_KEY = "event.created";
+const RULE_MATCHED_ROUTING_KEY = "event.rule.matched";
+const QUEUE_NAME = "rule-engine.event.created";
+
+interface EventCreatedMessage {
+  eventId: string;
+  tenantId: string;
+  type: string;
+  source?: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+// The first RabbitMQ *consumer* in this codebase (everything before this
+// only published). Subscribes to every event-service publishes and
+// evaluates each tenant's active rules against it.
+@Injectable()
+export class RuleConsumerService implements OnModuleInit {
+  private readonly logger = new Logger(RuleConsumerService.name);
+
+  constructor(
+    private readonly rabbitmq: RabbitMQService,
+    private readonly rulesService: RulesService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.rabbitmq.consume(EVENTS_EXCHANGE, EVENT_CREATED_ROUTING_KEY, QUEUE_NAME, (message) =>
+      this.handleEvent(message as EventCreatedMessage),
+    );
+  }
+
+  private async handleEvent(message: EventCreatedMessage): Promise<void> {
+    const rules = await this.rulesService.findActiveForEvaluation(message.tenantId, message.type);
+    if (rules.length === 0) {
+      return;
+    }
+
+    const context: Record<string, unknown> = {
+      type: message.type,
+      source: message.source,
+      tenantId: message.tenantId,
+      ...message.payload,
+    };
+
+    for (const rule of rules) {
+      const conditions = rule.conditions as Record<string, unknown> | null;
+      const matches =
+        !conditions || Object.keys(conditions).length === 0
+          ? true
+          : evaluate(conditions as unknown as Condition, context);
+
+      if (!matches) {
+        continue;
+      }
+
+      await this.prisma.ruleMatch.create({
+        data: {
+          ruleId: rule.id,
+          tenantId: rule.tenantId,
+          eventId: message.eventId,
+          actions: rule.actions as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
+        eventId: message.eventId,
+        tenantId: rule.tenantId,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        actions: rule.actions,
+        matchedAt: new Date().toISOString(),
+      });
+
+      this.logger.log(`Rule "${rule.name}" (${rule.id}) matched event ${message.eventId}`);
+    }
+  }
+}

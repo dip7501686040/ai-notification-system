@@ -2033,3 +2033,45 @@ Features
     ports 8001/8002/8003 no longer accept connections at all. Full
     workspace build+lint (35 packages) clean throughout all three
     phases.
+
+11. ✅ Rule Engine Service (first RabbitMQ consumer, event.created ->
+    event.rule.matched).
+    rule-engine-service: Prisma-backed `Rule`/`RuleMatch` models,
+    gRPC-only CRUD (`POST/GET/PATCH/DELETE /rules` via api-gateway,
+    identical shape/auth pattern to tenant-service and event-service).
+    A pure `evaluate()` function (`src/rules/rule-evaluator.ts`)
+    implements FR-3's full operator set from Chapter 2 above --
+    AND/OR/NOT/Equals/Contains/Regex/GreaterThan/LessThan -- against a
+    flattened `{type, source, tenantId, ...payload}` context, so the
+    FR-3 example (`Payment Failed AND Amount > 5000 AND Country = India`)
+    maps directly onto a rule's `eventType` + `conditions` tree.
+
+    This is the first RabbitMQ *consumer* in the codebase -- everything
+    before this only published. Added `RabbitMQService.consume()` to
+    `@ai-notification/rabbitmq`: binds a durable queue to a topic
+    exchange/routing key and dispatches each message to a handler,
+    ack'ing on success and nack'ing (no requeue) on a thrown error. Consumer
+    registrations are stored and replayed on every (re)connect -- the same
+    defensive pattern `publish()` already used for re-asserting exchanges
+    after a reconnect -- which also means `consume()` is safe to call
+    before the service's first connection finishes. `RuleConsumerService`
+    uses it to bind `rule-engine.event.created` to the `platform`
+    exchange's `event.created` key; on each event it loads the tenant's
+    enabled rules (matching the event's type or `"*"`), evaluates them,
+    and for every match writes a `RuleMatch` row and publishes
+    `event.rule.matched` -- ready for notification-service to consume
+    once it exists. Deliberately out of scope this pass (flagged, not
+    forgotten): no dead-letter queue, no action *execution* (that's
+    notification-service/channel-service), no rule-builder UI.
+
+    Verified live: created a rule (`amount > 5000 AND country ==
+    "India"`), posted one matching event and one non-matching event
+    through api-gateway, and confirmed via a direct database query that
+    exactly one `RuleMatch` row was created -- proving the AND-condition
+    actually discriminates rather than always firing -- with a matching
+    single log line from `RuleConsumerService`. Cross-checked against
+    RabbitMQ's management API: `publish_out: 2` on the `platform`
+    exchange, confirming both `event.created` messages were actually
+    routed to the new queue. Re-confirmed the standard 400/401/404
+    authorization edges and that port 8005 accepts no direct
+    connections. Full workspace build+lint (35 packages) clean.

@@ -3,10 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "prebuild": "prisma generate",
     "build": "nest build",
-    "start": "node dist/main.js",
-    "dev": "nest start --watch",
-    "lint": "eslint ."
+    "start": "prisma migrate deploy && node dist/main.js",
+    "dev": "prisma generate && nest start --watch",
+    "lint": "eslint .",
+    "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@ai-notification/common": "workspace:*",
@@ -20,13 +22,18 @@
     "zod": "^3.24.0",
     "@ai-notification/telemetry": "workspace:*",
     "@ai-notification/grpc": "workspace:*",
-    "@nestjs/microservices": "^10.4.15"
+    "@ai-notification/rabbitmq": "workspace:*",
+    "@nestjs/microservices": "^10.4.15",
+    "@prisma/client": "^5.22.0",
+    "class-validator": "^0.14.1",
+    "class-transformer": "^0.5.1"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",
     "@nestjs/cli": "^10.4.9",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "prisma": "^5.22.0",
     "typescript": "^5.9.3"
   }
 }

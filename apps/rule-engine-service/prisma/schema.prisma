@@ -1,0 +1,42 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/prisma-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Rule {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  eventType  String
+  conditions Json
+  actions    Json
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  matches RuleMatch[]
+
+  @@index([tenantId])
+  @@index([tenantId, eventType])
+}
+
+model RuleMatch {
+  id        String   @id @default(uuid())
+  ruleId    String
+  tenantId  String
+  eventId   String
+  actions   Json
+  createdAt DateTime @default(now())
+
+  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([ruleId])
+  @@index([eventId])
+}

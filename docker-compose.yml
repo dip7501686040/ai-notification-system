@@ -163,6 +163,7 @@ services:
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
       TENANT_GRPC_ADDRESS: tenant-service:50153
       EVENT_GRPC_ADDRESS: event-service:50154
+      RULE_ENGINE_GRPC_ADDRESS: rule-engine-service:50156
     ports:
       - "8000:8000"
 
@@ -251,8 +252,17 @@ services:
     environment:
       <<: *nest-env
       PORT: "8005"
-    ports:
-      - "8005:8005"
+      RULE_ENGINE_GRPC_PORT: "50156"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/rule_engine_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   notification-service:
     <<: *nest-defaults
