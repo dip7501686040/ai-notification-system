@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+message GetTenantRequest {
+  string tenant_id = 1;
+}
+
+message TenantMessage {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string plan = 4;
+  string status = 5;
+}
+
+message GetTenantResponse {
+  bool found = 1;
+  TenantMessage tenant = 2;
+}
+
+message CheckMembershipRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message CheckMembershipResponse {
+  bool is_member = 1;
+  string role = 2;
+}
+
+service Tenant {
+  rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
+  rpc CheckMembership(CheckMembershipRequest) returns (CheckMembershipResponse);
+}

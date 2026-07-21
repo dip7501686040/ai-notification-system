@@ -196,6 +196,14 @@ services:
     environment:
       <<: *nest-env
       PORT: "8002"
+      TENANT_GRPC_PORT: "50153"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tenant_db
+      IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     ports:
       - "8002:8002"
 

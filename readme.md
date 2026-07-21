@@ -1885,3 +1885,52 @@ Features
    5433). Proved the migrate-on-boot fix by dropping identity_db entirely
    and confirming a fresh container applied the migration itself before
    serving traffic.
+
+8. ✅ Tenant Service (organizations, membership, RBAC).
+   tenant-service: Prisma + Postgres-backed `Tenant` and `TenantMember`
+   models. REST API under `/tenants` -- create, list (scoped to the
+   caller's own memberships, with pagination/search/sort query params),
+   get, update, delete -- plus membership management
+   (list/add/update-role/remove members), all behind a guard that
+   validates the bearer token over real internal gRPC against
+   identity-service (the same "API Gateway -> Auth Service" pattern,
+   reused here for a downstream service rather than the gateway). A
+   second gRPC microservice exposes `tenant.v1.Tenant/GetTenant` and
+   `/CheckMembership` for other services to look up tenants without a
+   REST round trip.
+
+   Introduced two shared abstractions in `@ai-notification/common` ahead
+   of the other business services: `BaseCrudService` (generic
+   create/findUnique/update/delete/list over a Prisma delegate, with
+   `list()` handling `?page=&limit=`, `?search=` -- a JSON object for
+   per-field filters or a plain string for fuzzy OR-search across
+   caller-declared fields -- and `?sort_fields=&sort_type=`) and
+   `BaseCrudController` (the matching REST surface) for services with
+   plain, ownerless CRUD. tenant-service itself doesn't fit that
+   ownerless shape -- every route needs the caller's identity to enforce
+   membership/role checks, which TypeScript's method-override rules
+   correctly reject as incompatible with the base class's unscoped (id
+   -only) signatures -- so `TenantsController` composes `TenantsService`
+   directly instead of extending the base controller, while
+   `TenantsService` still extends `BaseCrudService` for its internal
+   Tenant CRUD.
+
+   Verified live end-to-end against the real containerized stack:
+   registered users via identity-service, created tenants, exercised
+   pagination/fuzzy-search/sort on the list endpoint, and confirmed the
+   authorization edge cases actually hold -- 403 when a plain member
+   tries to update tenant settings, 401 with no bearer token, 404 (not
+   403) for a non-member requesting a tenant by id so existence isn't
+   leaked, and 403 when trying to remove a tenant's last remaining
+   owner.
+
+   Caught one real pre-existing bug along the way: identity-service and
+   tenant-service both pin the same `@prisma/client` version, so pnpm
+   deduped them to a single physical location in the store -- each
+   service's `prisma generate` was silently overwriting the other's
+   generated model code (confirmed: after generating tenant-service's
+   client, identity-service's `User` model was gone from the shared
+   output). Fixed by giving each service's Prisma generator its own
+   `output` path (`apps/<service>/generated/prisma-client`, gitignored),
+   isolating the generated client per service regardless of version
+   overlap.

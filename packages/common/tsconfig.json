@@ -1,5 +1,5 @@
 {
-  "extends": "@ai-notification/typescript-config/library.json",
+  "extends": "@ai-notification/typescript-config/nestjs.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src"

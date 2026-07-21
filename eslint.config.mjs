@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/coverage/**",
       "**/.venv/**",
+      "**/generated/**",
     ],
   },
   js.configs.recommended,
