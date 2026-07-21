@@ -1934,3 +1934,102 @@ Features
    `output` path (`apps/<service>/generated/prisma-client`, gitignored),
    isolating the generated client per service regardless of version
    overlap.
+
+9. ✅ Event Service (ingestion, first RabbitMQ producer).
+   event-service: Prisma + Postgres-backed `Event` model. REST API:
+   `POST /events` (ingest), `GET /events?tenantId=` (paginated/search/
+   sort, scoped), `GET /events/:id`. Every route required a valid JWT
+   *and* tenant membership -- the latter checked over real gRPC against
+   tenant-service via `checkMembershipViaGrpc` (the same client built for
+   tenant-service's own `GetTenant`/`CheckMembership`, now consumed by a
+   second service), the first concrete use of "internal gRPC" between two
+   business services rather than gateway-to-service.
+
+   Added `@ai-notification/rabbitmq`: a lifecycle-managed
+   `RabbitMQService`/`RabbitMQModule` wrapping `amqplib` directly (no
+   NestJS microservices RMQ transport, no `@golevelup` wrapper) --
+   `amqplib` is already auto-instrumented for tracing by the existing
+   OpenTelemetry setup (`getNodeAutoInstrumentations()` bundles it), so
+   this got distributed tracing for free. Publishes to a durable topic
+   exchange `platform` with routing key `event.created`, matching the
+   RabbitMQ exchange list from the architecture chapter above --
+   available now for rule-engine-service/ai-service/notification-service
+   to consume from once they're built. Extended `BaseCrudService.list()`
+   with an optional `baseWhere` filter (ANDed with `?search=`), needed
+   for tenant-scoped listing and immediately reused, not speculative.
+
+   Verified live: ingested an event, confirmed `status: "published"`,
+   and independently confirmed via RabbitMQ's own management API
+   (`/api/exchanges/%2F/platform`) that `publish_in` incremented --
+   proof the message actually reached the broker, not just that the
+   client call didn't throw. Also exercised the authorization edges
+   (400 missing tenantId, 401/403/404).
+
+   Caught one real bug live: an unhandled promise rejection in the
+   RabbitMQ reconnect path. Node treats unhandled rejections as fatal,
+   so a transient disconnect during the broker's own startup crashed the
+   whole event-service process. Fixed with a `scheduleReconnect()` that
+   catches its own failures and retries indefinitely instead of letting
+   one rejected `connect()` bring the process down.
+
+10. ✅ Route every public API through api-gateway only.
+    Until this point, identity-service/tenant-service/event-service each
+    exposed REST directly (ports 8001/8002/8003) *in addition to*
+    api-gateway -- inconsistent with the architecture chapter above
+    (API Gateway Responsibilities: Authentication -> Authorization ->
+    Routing, "No business logic"; Communication Matrix: gateway talks to
+    every backend over gRPC). Restructured so api-gateway is the only
+    public door: identity/tenant/event-service's REST controllers were
+    deleted outright (gRPC-only internally, keeping just `/health` for
+    the Dockerfile's own healthcheck), and their full REST surfaces were
+    rebuilt in api-gateway as thin gRPC proxies.
+
+    Auth model for the internal calls: api-gateway is the only place
+    that ever resolves a bearer token to a user (already did this via
+    `GrpcAuthGuard`/`validateTokenViaGrpc`). It passes the resolved
+    `requesterId` as an explicit field on every outgoing gRPC request;
+    tenant-service/event-service's membership/role-check logic is
+    completely unchanged, it just now reads `userId` off the gRPC
+    message instead of a locally-populated `req.user`.
+
+    Also added, as part of this pass since none of it existed yet:
+    forgot/reset-password (`PasswordResetToken` model, SHA-256-hashed
+    tokens, 1h expiry; no SMTP configured in this environment so the
+    reset token is logged rather than emailed, same "no real credentials
+    here" stance as Google OAuth) and moved Google OAuth's strategy/
+    controller from identity-service to api-gateway entirely -- the
+    browser has to reach the OAuth redirect/callback directly, so that
+    can't live behind the gRPC boundary; the callback now calls
+    identity-service's `ValidateOAuthUser` RPC instead of a local
+    `AuthService`.
+
+    Expanding ~20 new RPCs (register/login/me/forgot/reset/oauth, 8
+    tenant CRUD+membership ops, 3 event ops) made per-RPC hand-rolled
+    gRPC client boilerplate too repetitive, so `@ai-notification/grpc`
+    gained two shared pieces used throughout: `callUnary()` (wraps the
+    deadline/invoke/close plumbing once) and a matched pair,
+    `GrpcExceptionFilter` (server side) / `throwAsHttpException` (client
+    side), so a service method can keep throwing the exact same
+    `ConflictException`/`NotFoundException`/etc. it always did and
+    api-gateway gets the right HTTP status back automatically.
+
+    That exception-filter pair is also where the pass caught its one
+    real bug: NestJS's gRPC transport hands whatever an exception filter
+    returns straight to grpc-js's `call.emit("error", ...)`, which reads
+    `.code`/`.message` directly off that value. The first version
+    returned `new RpcException({code, message})` -- but `RpcException`
+    hides its payload behind `.getError()` instead of exposing `.code`
+    directly, so every mapped status silently degraded to
+    UNKNOWN/500. Confirmed live (`POST /auth/register` on a duplicate
+    email came back 500 instead of 409) before fixing it to return the
+    plain `{code, message}` object the transport actually expects --
+    confirmed again afterward (409/401 came back correctly).
+
+    Verified live end-to-end through port 8000 only, phase by phase:
+    full auth flow including forgot/reset-password with token-reuse
+    rejection; tenant CRUD and membership with every authorization edge
+    case (401/403/404) re-run against the gateway; event ingestion with
+    the RabbitMQ publish re-confirmed via the exchange API. Confirmed
+    ports 8001/8002/8003 no longer accept connections at all. Full
+    workspace build+lint (35 packages) clean throughout all three
+    phases.

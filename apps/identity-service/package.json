@@ -25,21 +25,13 @@
     "@nestjs/microservices": "^10.4.15",
     "@prisma/client": "^5.22.0",
     "@nestjs/jwt": "^10.2.0",
-    "@nestjs/passport": "^10.0.3",
-    "passport": "^0.7.0",
-    "passport-jwt": "^4.0.1",
-    "passport-google-oauth20": "^2.0.0",
-    "bcryptjs": "^2.4.3",
-    "class-validator": "^0.14.1",
-    "class-transformer": "^0.5.1"
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",
     "@nestjs/cli": "^10.4.9",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
-    "@types/passport-jwt": "^4.0.1",
-    "@types/passport-google-oauth20": "^2.0.16",
     "@types/bcryptjs": "^2.4.6",
     "prisma": "^5.22.0",
     "typescript": "^5.9.3"

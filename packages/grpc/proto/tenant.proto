@@ -6,12 +6,20 @@ message GetTenantRequest {
   string tenant_id = 1;
 }
 
+message GetTenantForUserRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
 message TenantMessage {
   string id = 1;
   string name = 2;
   string slug = 3;
   string plan = 4;
   string status = 5;
+  string settings_json = 6;
+  string created_at = 7;
+  string updated_at = 8;
 }
 
 message GetTenantResponse {
@@ -29,7 +37,111 @@ message CheckMembershipResponse {
   string role = 2;
 }
 
+message MemberMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string role = 4;
+  string created_at = 5;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message SuccessResponse {
+  bool success = 1;
+}
+
+message CreateTenantRequest {
+  string requester_id = 1;
+  string name = 2;
+  string slug = 3;
+  string plan = 4;
+}
+
+message TenantWithRoleMessage {
+  TenantMessage tenant = 1;
+  string role = 2;
+}
+
+message ListTenantsRequest {
+  string requester_id = 1;
+  ListQuery query = 2;
+}
+
+message ListTenantsResponse {
+  repeated TenantWithRoleMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+// Empty string for name/plan/status/settings_json means "leave unchanged"
+// (none of those are ever legitimately empty once a tenant exists).
+message UpdateTenantRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string plan = 4;
+  string status = 5;
+  string settings_json = 6;
+}
+
+message DeleteTenantRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
+message ListMembersRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+}
+
+message ListMembersResponse {
+  repeated MemberMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message AddMemberRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string role = 4;
+}
+
+message UpdateMemberRoleRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string role = 4;
+}
+
+message RemoveMemberRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+}
+
 service Tenant {
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
+  rpc GetTenantForUser(GetTenantForUserRequest) returns (TenantMessage);
   rpc CheckMembership(CheckMembershipRequest) returns (CheckMembershipResponse);
+  rpc CreateTenant(CreateTenantRequest) returns (TenantMessage);
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  rpc UpdateTenant(UpdateTenantRequest) returns (TenantMessage);
+  rpc DeleteTenant(DeleteTenantRequest) returns (SuccessResponse);
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  rpc AddMember(AddMemberRequest) returns (MemberMessage);
+  rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (MemberMessage);
+  rpc RemoveMember(RemoveMemberRequest) returns (SuccessResponse);
 }

@@ -59,10 +59,21 @@ export abstract class BaseCrudService<
 
   // Paginated listing with optional fuzzy/field search (?search=) and
   // sorting (?sort_fields=&sort_type=). See list-query.ts for the query
-  // param contract.
-  async list(query: RawListQuery, options: ListOptions = {}): Promise<Paginated<Entity>> {
+  // param contract. baseWhere is a caller-supplied filter (e.g. tenant
+  // scoping) that's always applied, ANDed with whatever ?search= derives --
+  // unlike the query-driven where, it isn't optional at the caller's
+  // discretion.
+  async list(
+    query: RawListQuery,
+    options: ListOptions = {},
+    baseWhere?: WhereInput,
+  ): Promise<Paginated<Entity>> {
     const parsed = parseListQuery(query, options);
-    const where = parsed.where as WhereInput | undefined;
+    const searchWhere = parsed.where as WhereInput | undefined;
+    const where =
+      baseWhere !== undefined && searchWhere !== undefined
+        ? ({ AND: [baseWhere, searchWhere] } as WhereInput)
+        : (baseWhere ?? searchWhere);
     const orderBy = parsed.orderBy as OrderByInput[] | undefined;
 
     const [list, total] = await Promise.all([

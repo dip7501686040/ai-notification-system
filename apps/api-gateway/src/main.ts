@@ -1,6 +1,7 @@
 import "./tracing";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import { ValidationPipe } from "@nestjs/common";
 import type { MicroserviceOptions } from "@nestjs/microservices";
 import { grpcHealthMicroserviceOptions } from "@ai-notification/grpc";
 import { AppModule } from "./app.module";
@@ -10,6 +11,8 @@ import { env } from "./env";
 async function bootstrap() {
   const logger = createLogger("api-gateway");
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   app.connectMicroservice<MicroserviceOptions>(grpcHealthMicroserviceOptions(env.GRPC_PORT));
   await app.startAllMicroservices();

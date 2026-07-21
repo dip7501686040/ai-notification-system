@@ -13,6 +13,68 @@ message ValidateTokenResponse {
   string error = 4;
 }
 
+message UserMessage {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string provider = 4;
+}
+
+message AuthResult {
+  UserMessage user = 1;
+  string access_token = 2;
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  bool found = 1;
+  UserMessage user = 2;
+}
+
+message ValidateOAuthUserRequest {
+  string email = 1;
+  string name = 2;
+  string provider = 3;
+  string provider_id = 4;
+}
+
+message ForgotPasswordRequest {
+  string email = 1;
+}
+
+message ForgotPasswordResponse {
+  bool success = 1;
+}
+
+message ResetPasswordRequest {
+  string token = 1;
+  string new_password = 2;
+}
+
+message ResetPasswordResponse {
+  bool success = 1;
+}
+
 service Auth {
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc Register(RegisterRequest) returns (AuthResult);
+  rpc Login(LoginRequest) returns (AuthResult);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ValidateOAuthUser(ValidateOAuthUserRequest) returns (AuthResult);
+  rpc ForgotPassword(ForgotPasswordRequest) returns (ForgotPasswordResponse);
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
 }

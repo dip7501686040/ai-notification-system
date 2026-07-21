@@ -161,6 +161,8 @@ services:
       <<: *nest-env
       PORT: "8000"
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+      EVENT_GRPC_ADDRESS: event-service:50154
     ports:
       - "8000:8000"
 
@@ -183,8 +185,6 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-    ports:
-      - "8001:8001"
 
   tenant-service:
     <<: *nest-defaults
@@ -204,8 +204,6 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-    ports:
-      - "8002:8002"
 
   event-service:
     <<: *nest-defaults
@@ -217,8 +215,18 @@ services:
     environment:
       <<: *nest-env
       PORT: "8003"
-    ports:
-      - "8003:8003"
+      EVENT_GRPC_PORT: "50154"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/event_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   ai-service:
     <<: *nest-defaults

@@ -1,7 +1,12 @@
 import { Controller } from "@nestjs/common";
 import { GrpcMethod } from "@nestjs/microservices";
 import { JwtService } from "@nestjs/jwt";
-import { AuthService, type AuthTokenPayload } from "../auth.service";
+import {
+  AuthService,
+  type AuthResult,
+  type AuthTokenPayload,
+  type SafeUser,
+} from "../auth.service";
 
 interface ValidateTokenRequest {
   token: string;
@@ -12,6 +17,62 @@ interface ValidateTokenResponse {
   user_id: string;
   email: string;
   error: string;
+}
+
+interface UserMessage {
+  id: string;
+  email: string;
+  name: string;
+  provider: string;
+}
+
+interface AuthResultMessage {
+  user: UserMessage;
+  access_token: string;
+}
+
+interface RegisterRequest {
+  email: string;
+  password: string;
+  name: string;
+}
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface GetUserRequest {
+  user_id: string;
+}
+
+interface GetUserResponse {
+  found: boolean;
+  user: UserMessage | null;
+}
+
+interface ValidateOAuthUserRequest {
+  email: string;
+  name: string;
+  provider: string;
+  provider_id: string;
+}
+
+interface ForgotPasswordRequest {
+  email: string;
+}
+
+interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
+function toUserMessage(user: SafeUser): UserMessage {
+  return { id: user.id, email: user.email, name: user.name ?? "", provider: user.provider };
+}
+
+function toAuthResultMessage(result: AuthResult): AuthResultMessage {
+  return { user: toUserMessage(result.user), access_token: result.accessToken };
 }
 
 @Controller()
@@ -35,5 +96,50 @@ export class AuthGrpcController {
       const message = error instanceof Error ? error.message : "Invalid token";
       return { valid: false, user_id: "", email: "", error: message };
     }
+  }
+
+  @GrpcMethod("Auth", "Register")
+  async register(data: RegisterRequest): Promise<AuthResultMessage> {
+    const result = await this.authService.register(
+      data.email,
+      data.password,
+      data.name || undefined,
+    );
+    return toAuthResultMessage(result);
+  }
+
+  @GrpcMethod("Auth", "Login")
+  async login(data: LoginRequest): Promise<AuthResultMessage> {
+    const result = await this.authService.login(data.email, data.password);
+    return toAuthResultMessage(result);
+  }
+
+  @GrpcMethod("Auth", "GetUser")
+  async getUser(data: GetUserRequest): Promise<GetUserResponse> {
+    const user = await this.authService.findById(data.user_id);
+    return { found: Boolean(user), user: user ? toUserMessage(user) : null };
+  }
+
+  @GrpcMethod("Auth", "ValidateOAuthUser")
+  async validateOAuthUser(data: ValidateOAuthUserRequest): Promise<AuthResultMessage> {
+    const result = await this.authService.validateOAuthUser({
+      email: data.email,
+      name: data.name || undefined,
+      provider: data.provider,
+      providerId: data.provider_id,
+    });
+    return toAuthResultMessage(result);
+  }
+
+  @GrpcMethod("Auth", "ForgotPassword")
+  async forgotPassword(data: ForgotPasswordRequest): Promise<{ success: boolean }> {
+    await this.authService.forgotPassword(data.email);
+    return { success: true };
+  }
+
+  @GrpcMethod("Auth", "ResetPassword")
+  async resetPassword(data: ResetPasswordRequest): Promise<{ success: boolean }> {
+    await this.authService.resetPassword(data.token, data.new_password);
+    return { success: true };
   }
 }

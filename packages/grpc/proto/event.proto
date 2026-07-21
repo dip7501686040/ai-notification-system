@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package event.v1;
+
+message EventMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string type = 3;
+  string source = 4;
+  string payload_json = 5;
+  string status = 6;
+  string created_at = 7;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message CreateEventRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string type = 3;
+  string source = 4;
+  string payload_json = 5;
+}
+
+message ListEventsRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+}
+
+message ListEventsResponse {
+  repeated EventMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message GetEventRequest {
+  string requester_id = 1;
+  string event_id = 2;
+}
+
+service Event {
+  rpc CreateEvent(CreateEventRequest) returns (EventMessage);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc GetEvent(GetEventRequest) returns (EventMessage);
+}

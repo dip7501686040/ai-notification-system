@@ -1,13 +1,13 @@
 import { Controller, Get, Req, Res, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import type { Request, Response } from "express";
-import { AuthService } from "./auth.service";
+import { validateOAuthUserViaGrpc } from "@ai-notification/grpc";
+import { grpcCall } from "../grpc-call";
+import { env } from "../env";
 import type { GoogleOAuthUser } from "./strategies/google.strategy";
 
 @Controller("auth/google")
 export class GoogleAuthController {
-  constructor(private readonly authService: AuthService) {}
-
   @Get()
   @UseGuards(AuthGuard("google"))
   login(): void {
@@ -18,7 +18,9 @@ export class GoogleAuthController {
   @UseGuards(AuthGuard("google"))
   async callback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const profile = req.user as GoogleOAuthUser;
-    const result = await this.authService.validateOAuthUser(profile);
+    const result = await grpcCall(() =>
+      validateOAuthUserViaGrpc(env.IDENTITY_AUTH_GRPC_ADDRESS, profile),
+    );
     res.json(result);
   }
 }

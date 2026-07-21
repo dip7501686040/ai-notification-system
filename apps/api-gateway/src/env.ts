@@ -5,6 +5,13 @@ const schema = z.object({
   GRPC_PORT: z.coerce.number().default(50051),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   IDENTITY_AUTH_GRPC_ADDRESS: z.string().default("identity-service:50152"),
+  TENANT_GRPC_ADDRESS: z.string().default("tenant-service:50153"),
+  EVENT_GRPC_ADDRESS: z.string().default("event-service:50154"),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALLBACK_URL: z.string().optional(),
 });
 
 export const env = loadEnv(schema);
+
+export const isGoogleOAuthConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);

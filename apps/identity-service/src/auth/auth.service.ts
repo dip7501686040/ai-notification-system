@@ -1,8 +1,17 @@
+import * as crypto from "node:crypto";
 import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
+import { createLogger } from "@ai-notification/logger";
 import type { User } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
+
+const logger = createLogger("identity-service");
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 export interface AuthTokenPayload {
   sub: string;
@@ -79,6 +88,48 @@ export class AuthService {
     }
 
     return { user: toSafeUser(user), accessToken: this.issueToken(user) };
+  }
+
+  // Always resolves (never reveals whether the email is registered). No
+  // SMTP provider is configured in this environment, so the reset token is
+  // logged rather than emailed -- this log line *is* the "email" here,
+  // mirroring how Google OAuth is only wired up when real credentials are
+  // present.
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return;
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      },
+    });
+
+    logger.info({ email: user.email, resetToken: token }, "Password reset requested");
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const record = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashToken(token) },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new UnauthorizedException("Invalid or expired reset token");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
   }
 
   issueToken(user: User): string {
