@@ -6,6 +6,7 @@ export * from "./auth-client";
 export * from "./tenant-client";
 export * from "./event-client";
 export * from "./rule-client";
+export * from "./notification-client";
 export * from "./call-unary";
 export * from "./grpc-exception.filter";
 export * from "./grpc-error";

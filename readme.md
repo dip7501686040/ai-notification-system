@@ -2075,3 +2075,48 @@ Features
     routed to the new queue. Re-confirmed the standard 400/401/404
     authorization edges and that port 8005 accepts no direct
     connections. Full workspace build+lint (35 packages) clean.
+
+12. ✅ Notification Service (second RabbitMQ consumer, notification
+    lifecycle + retries).
+    notification-service: a `Notification` model tracking FR-7's exact
+    status lifecycle from Chapter 2 above (`pending -> sent |
+    retrying -> dead_letter`), read-only gRPC CRUD (`GET
+    /notifications?tenantId=&status=`, `GET /notifications/:id` via
+    api-gateway). This is where rule-engine-service's `Rule.actions` --
+    left deliberately unshaped when that service was built, since nothing
+    consumed it yet -- got a real contract: `{ channel: string, target:
+    string, template?: string }` per action, with malformed entries
+    skipped (logged, not fatal) rather than failing the whole match.
+
+    The second RabbitMQ consumer in the codebase: `NotificationConsumerService`
+    binds to the `platform` exchange's `event.rule.matched` key (reusing
+    `RabbitMQService.consume()` added for rule-engine-service) and turns
+    each action into a tracked `Notification` row.
+
+    Channel Service and Template Service (FR-6) don't exist yet, so
+    "dispatch" is simulated rather than real: `DispatchSimulatorService`
+    logs "would send via {channel} to {target}" -- the same "no real
+    external integration configured" convention as identity-service's
+    forgot-password token -- and deterministically fails when `target`
+    contains `"fail"`, so the retry/dead-letter path is actually
+    exercisable in verification instead of just theoretical.
+    `RetrySchedulerService` is a hand-rolled `setInterval` poller (10s/
+    30s/60s backoff, 3 max attempts by default) rather than adopting
+    BullMQ against the Redis already sitting unused in docker-compose --
+    consistent with how `RabbitMQService`'s own reconnect logic is a
+    manual retry loop, not a library; BullMQ remains a sensible future
+    upgrade, flagged rather than adopted here. Every lifecycle transition
+    publishes `notification.created`/`sent`/`retry`/`dead` on the
+    `platform` exchange, per the RabbitMQ exchange list above.
+
+    Verified live: created a rule with two actions -- one normal target,
+    one deliberately containing `"fail"` -- and posted a matching event.
+    The first notification reached `status: "sent"` immediately; the
+    second cycled through `"retrying"` (confirmed `attempts` incrementing
+    and `lastError` populated at each step) and, after polling through
+    the real backoff schedule, landed on `"dead_letter"` -- confirmed via
+    a direct database query, not just the log line. Re-verified through
+    the REST API too (status filter, get-by-id), all standard 400/401/403
+    authorization edges, RabbitMQ `publish_out` increasing further with
+    the new queue bound, and that port 8006 accepts no direct
+    connections. Full workspace build+lint (35 packages) clean.

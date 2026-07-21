@@ -164,6 +164,7 @@ services:
       TENANT_GRPC_ADDRESS: tenant-service:50153
       EVENT_GRPC_ADDRESS: event-service:50154
       RULE_ENGINE_GRPC_ADDRESS: rule-engine-service:50156
+      NOTIFICATION_GRPC_ADDRESS: notification-service:50157
     ports:
       - "8000:8000"
 
@@ -274,8 +275,17 @@ services:
     environment:
       <<: *nest-env
       PORT: "8006"
-    ports:
-      - "8006:8006"
+      NOTIFICATION_GRPC_PORT: "50157"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/notification_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   channel-service:
     <<: *nest-defaults

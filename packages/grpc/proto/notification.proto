@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package notification.v1;
+
+message NotificationMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string event_id = 3;
+  string rule_id = 4;
+  string channel = 5;
+  string target = 6;
+  string payload_json = 7;
+  string status = 8;
+  int32 attempts = 9;
+  int32 max_attempts = 10;
+  string last_error = 11;
+  string next_attempt_at = 12;
+  string sent_at = 13;
+  string created_at = 14;
+  string updated_at = 15;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message ListNotificationsRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string status = 3;
+  ListQuery query = 4;
+}
+
+message ListNotificationsResponse {
+  repeated NotificationMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message GetNotificationRequest {
+  string requester_id = 1;
+  string notification_id = 2;
+}
+
+// Read-only: lifecycle is managed entirely by notification-service's own
+// consumer/retry-scheduler, not by external callers.
+service Notification {
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+  rpc GetNotification(GetNotificationRequest) returns (NotificationMessage);
+}

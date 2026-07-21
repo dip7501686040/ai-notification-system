@@ -10,6 +10,7 @@ import { GoogleStrategy } from "./auth/strategies/google.strategy";
 import { TenantsController } from "./tenants/tenants.controller";
 import { EventsController } from "./events/events.controller";
 import { RulesController } from "./rules/rules.controller";
+import { NotificationsController } from "./notifications/notifications.controller";
 import { isGoogleOAuthConfigured } from "./env";
 
 const controllers: Type<unknown>[] = [
@@ -21,6 +22,7 @@ const controllers: Type<unknown>[] = [
   TenantsController,
   EventsController,
   RulesController,
+  NotificationsController,
 ];
 const providers: Type<unknown>[] = [];
 

@@ -8,6 +8,7 @@ const schema = z.object({
   TENANT_GRPC_ADDRESS: z.string().default("tenant-service:50153"),
   EVENT_GRPC_ADDRESS: z.string().default("event-service:50154"),
   RULE_ENGINE_GRPC_ADDRESS: z.string().default("rule-engine-service:50156"),
+  NOTIFICATION_GRPC_ADDRESS: z.string().default("notification-service:50157"),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().optional(),
