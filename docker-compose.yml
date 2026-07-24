@@ -7,6 +7,7 @@ networks:
 volumes:
   postgres_data:
   grafana_data:
+  ollama_data:
 
 x-nest-build: &nest-build
   context: .
@@ -165,6 +166,7 @@ services:
       EVENT_GRPC_ADDRESS: event-service:50154
       RULE_ENGINE_GRPC_ADDRESS: rule-engine-service:50156
       NOTIFICATION_GRPC_ADDRESS: notification-service:50157
+      AI_GRPC_ADDRESS: ai-service:50155
     ports:
       - "8000:8000"
 
@@ -230,6 +232,40 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # Local LLM runtime for ai-service (chat model: qwen2.5:0.5b -- the
+  # balance point found after: llama3.1:8b OOM'd, llama3.2:3b took minutes
+  # per call with RAG context, llama3.2:1b was still too slow, and
+  # smollm2:135m was fast but produced incoherent output (wrong-shaped
+  # summaries, a date string as a "recommendation"). Qwen's small models
+  # are specifically tuned for instruction-following/structured output
+  # relative to their size -- coherent responses in ~5s on this hardware.
+  # embeddings for RAG duplicate-detection retrieval: nomic-embed-text).
+  # No API key, no billing -- runs entirely in-network.
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks: [ai-notification]
+
+  # One-shot: pulls the models ai-service needs, then exits. ai-service
+  # itself doesn't wait on this -- a request against a not-yet-pulled
+  # model just fails gracefully into a "failed" EventAnalysis row, same as
+  # any other provider error.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull qwen2.5:0.5b && ollama pull nomic-embed-text",
+      ]
+    networks: [ai-notification]
+
   ai-service:
     <<: *nest-defaults
     build:
@@ -240,8 +276,24 @@ services:
     environment:
       <<: *nest-env
       PORT: "8004"
-    ports:
-      - "8004:8004"
+      AI_GRPC_PORT: "50155"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:0.5b
+      EMBEDDING_MODEL: nomic-embed-text
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      ollama:
+        condition: service_started
 
   rule-engine-service:
     <<: *nest-defaults

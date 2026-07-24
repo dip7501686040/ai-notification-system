@@ -1,0 +1,43 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/prisma-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model EventAnalysis {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  eventId            String
+  type               String
+  provider           String
+  model              String
+  summary            String
+  category           String
+  severity           String
+  businessImpact     String
+  recommendation     String
+  isDuplicate        Boolean  @default(false)
+  duplicateOfEventId String?
+  status             String
+  error              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([eventId])
+  @@index([tenantId, type])
+}
+
+model TenantAiConfig {
+  id        String   @id @default(uuid())
+  tenantId  String   @unique
+  provider  String
+  model     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package ai.v1;
+
+message EventAnalysisMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string event_id = 3;
+  string type = 4;
+  string provider = 5;
+  string model = 6;
+  string summary = 7;
+  string category = 8;
+  string severity = 9;
+  string business_impact = 10;
+  string recommendation = 11;
+  bool is_duplicate = 12;
+  string duplicate_of_event_id = 13;
+  string status = 14;
+  string error = 15;
+  string created_at = 16;
+  string updated_at = 17;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message ListEventAnalysesRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+}
+
+message ListEventAnalysesResponse {
+  repeated EventAnalysisMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message GetEventAnalysisRequest {
+  string requester_id = 1;
+  string analysis_id = 2;
+}
+
+message GetEventAnalysisByEventRequest {
+  string requester_id = 1;
+  string event_id = 2;
+}
+
+message AiConfigMessage {
+  string tenant_id = 1;
+  string provider = 2;
+  string model = 3;
+}
+
+message GetAiConfigRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
+message SetAiConfigRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string provider = 3;
+  string model = 4;
+}
+
+service AiAnalysis {
+  rpc ListEventAnalyses(ListEventAnalysesRequest) returns (ListEventAnalysesResponse);
+  rpc GetEventAnalysis(GetEventAnalysisRequest) returns (EventAnalysisMessage);
+  rpc GetEventAnalysisByEvent(GetEventAnalysisByEventRequest) returns (EventAnalysisMessage);
+  rpc GetAiConfig(GetAiConfigRequest) returns (AiConfigMessage);
+  rpc SetAiConfig(SetAiConfigRequest) returns (AiConfigMessage);
+}

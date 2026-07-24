@@ -2120,3 +2120,84 @@ Features
     authorization edges, RabbitMQ `publish_out` increasing further with
     the new queue bound, and that port 8006 accepts no direct
     connections. Full workspace build+lint (35 packages) clean.
+
+13. ✅ AI Service (third RabbitMQ consumer, event.created ->
+    event.ai.completed; multi-provider LLM analysis + RAG duplicate
+    detection).
+    ai-service: the third independent consumer of `event.created`
+    (alongside rule-engine-service and notification-service's own
+    upstream) -- a topic exchange fans the same routing key out to every
+    bound queue, no coordination needed between consumers. An
+    `EventAnalysis` model tracks FR-4's fields (summary, category,
+    severity, businessImpact, recommendation, isDuplicate/duplicateOfEventId)
+    plus `status`/`error` so an LLM failure is a queryable row, not a
+    silently dropped message. Read-only gRPC CRUD (`GET
+    /ai-analyses?tenantId=`, `GET /ai-analyses/:id`, `GET
+    /ai-analyses/by-event/:eventId`) via api-gateway, same shape as every
+    prior service's read surface.
+
+    Not locked to one LLM: a `TenantAiConfig` model lets each tenant pick
+    its provider (Anthropic/OpenAI/Ollama) and model independently, write-
+    gated to `owner`/`admin` (reusing `checkMembershipViaGrpc`'s `role`
+    field and tenant-service's own `MANAGE_TENANT_ROLES` convention rather
+    than adding a new one), read open to any member; an unconfigured
+    provider (no API key on this deployment) is rejected with a 400 at
+    write time rather than accepted and left to fail silently later.
+    Absence of a row falls back to a platform default
+    (`DEFAULT_AI_PROVIDER`). All three providers sit behind one
+    `LangchainProvider` using LangChain's `ChatAnthropic`/`ChatOpenAI`/
+    `ChatOllama` + `.withStructuredOutput()`, rather than three hand-rolled
+    SDK integrations -- one code path, one prompt, one Zod schema.
+
+    Duplicate detection is retrieval-augmented rather than a flat SQL
+    filter: before calling the LLM, `SimilarEventRetrieverService` embeds
+    the new event's description (Ollama's `nomic-embed-text`, run locally
+    regardless of which provider does the analysis itself) and compares it
+    by cosine similarity against the tenant's recent completed analyses,
+    passing only genuinely similar ones as prompt context. This catches a
+    duplicate reported under a *different* event type/wording, which an
+    exact `type` match would have missed entirely.
+
+    Real problems hit building this, not just theoretical ones:
+    - The Anthropic SDK's `zodOutputFormat()` helper needs Zod v4's
+      internal schema shape; this workspace pins Zod v3 everywhere.
+      Fixed by building the JSON Schema for `output_config.format` by
+      hand (same approach already needed for OpenAI's structured outputs)
+      instead of pulling in a second Zod major version for one helper.
+    - The RAG similarity threshold was wrong on the first pass: 0.75
+      looked reasonable but, measured directly against Ollama's embeddings
+      endpoint, a genuine duplicate scored ~0.72 against its own stored
+      summary (comparing a raw event description to an LLM-generated
+      summary scores lower than comparing same-register text) while an
+      unrelated event scored ~0.56 -- retuned to 0.65 after confirming
+      that gap held.
+    - A pasted-in-chat OpenAI key was treated as already exposed (never
+      written anywhere but a gitignored root `.env`, rotation recommended
+      regardless) -- and its account genuinely had no billing quota,
+      confirmed independently with a raw `curl` straight to OpenAI's API
+      outside the app, which is exactly the case the `status: "failed"` +
+      `error` field exists for: caught, logged, persisted, no crash.
+    - Running a real local model surfaced real hardware limits, not
+      simulated ones: `llama3.1:8b` was OOM-killed under Docker Desktop's
+      then-3.8GB VM limit (raised to 7.75GB); `llama3.2:3b` worked but
+      took 12+ minutes on one call once RAG context lengthened the prompt,
+      and its CPU usage starved sibling containers badly enough to cause
+      unrelated gRPC calls to time out; `llama3.2:1b` was still too slow;
+      `smollm2:135m` was fast (~19s) but incoherent (a date string as a
+      "recommendation" field). Landed on `qwen2.5:0.5b` -- coherent output
+      in 15-20s on this hardware. Confirmed the RAG retrieval mechanism
+      itself was correct (using a larger model as a control) before
+      accepting, as an honest capability limit rather than a bug, that a
+      0.5B model won't reliably act on retrieved duplicate context even
+      though the retrieval feeding it is right.
+
+    Verified live: real completed analyses from both OpenAI (before its
+    quota ran out) and a fully local Ollama model, each producing a
+    genuine summary/severity/businessImpact/recommendation -- not stub
+    text. Tenant AI-config RBAC re-run against the gateway (403 for a
+    plain member, 200 read for any member, 400 for an unconfigured
+    provider). RabbitMQ `publish_out` confirmed incrementing per
+    `event.created` message with both rule-engine-service's and
+    ai-service's queues bound to it independently. Standard 401/404
+    authorization edges, and port 8004 accepts no direct connections.
+    Full workspace build+lint clean throughout.

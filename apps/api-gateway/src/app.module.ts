@@ -11,6 +11,7 @@ import { TenantsController } from "./tenants/tenants.controller";
 import { EventsController } from "./events/events.controller";
 import { RulesController } from "./rules/rules.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
+import { AiController } from "./ai/ai.controller";
 import { isGoogleOAuthConfigured } from "./env";
 
 const controllers: Type<unknown>[] = [
@@ -23,6 +24,7 @@ const controllers: Type<unknown>[] = [
   EventsController,
   RulesController,
   NotificationsController,
+  AiController,
 ];
 const providers: Type<unknown>[] = [];
 
