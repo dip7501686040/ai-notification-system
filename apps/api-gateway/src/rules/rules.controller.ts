@@ -23,6 +23,8 @@ import {
 import { grpcCall } from "../grpc-call";
 import { env } from "../env";
 import { GrpcAuthGuard, type AuthenticatedUser } from "../auth/grpc-auth.guard";
+import { TenantRolesGuard } from "../auth/tenant-roles.guard";
+import { Roles } from "../auth/roles.decorator";
 import { CreateRuleDto } from "./dto/create-rule.dto";
 import { UpdateRuleDto } from "./dto/update-rule.dto";
 
@@ -31,8 +33,12 @@ function currentUser(req: Request): AuthenticatedUser {
 }
 
 @Controller("rules")
-@UseGuards(GrpcAuthGuard)
+@UseGuards(GrpcAuthGuard, TenantRolesGuard)
 export class RulesController {
+  // Rules control automated dispatch -- administrative. Gateway checks
+  // this as a fast-fail (tenantId is in the body, no fetch needed);
+  // rule-engine-service's own RulesService re-checks it authoritatively.
+  @Roles("owner", "admin")
   @Post()
   create(@Req() req: Request, @Body() dto: CreateRuleDto) {
     return grpcCall(() =>

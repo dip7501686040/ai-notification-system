@@ -2435,3 +2435,58 @@ Features
     all four of the test user's own rows: one login, three rule changes).
     Standard 400/401/403 authorization edges, port 8010 accepting no
     direct connections, and full workspace build+lint clean.
+
+18. ✅ RBAC: formalize tenant roles (owner/admin/member) across
+    rule-engine-service, template-service, audit-service, and api-gateway.
+    Asked to "apply RBAC in identity-service" -- investigation found the
+    role model already exists, just not owned by identity-service: `
+    tenant-service` fully implements `owner`/`admin`/`member`
+    (`TenantMember.role`) and enforces it on its own writes via a private
+    `requireRole()`, and `checkMembershipViaGrpc` (called by every other
+    service) already returns `{isMember, role}`. Everything except
+    ai-service's tenant-AI-config write path was ignoring the `role` half
+    of that response and letting any tenant member do anything.
+    identity-service correctly gets no changes here -- roles are per-
+    tenant, not a property of the user account, so there's nothing for
+    it to own under this model.
+
+    Rules and templates control automated dispatch/notification content
+    -- meaningfully administrative -- so `create`/`update`/`delete` on
+    both are now gated to owner/admin; the tenant-wide `GET /audit-logs`
+    view is gated the same way (an audit trail is sensitive, member-read
+    was too broad). Left deliberately open at member-level: reading
+    rules/templates, `POST /events` (the low-friction ingestion entry
+    point), `PATCH /notifications/:id/read` (personal viewer state, not
+    administrative), `/audit-logs/me` (already self-scoped by `actorId`),
+    and `/analytics/*` (operational dashboards, not sensitive).
+
+    Two enforcement layers, not one, matching this codebase's existing
+    "no service trusts its caller" philosophy (every service already
+    re-verifies membership itself even though api-gateway already
+    authenticated the JWT): each service's private `assertMembership`
+    helper (rule-engine-service, template-service, audit-service) grew an
+    `allowedRoles?: string[]` parameter -- this is the *authoritative*
+    check, and the only one protecting `PATCH`/`DELETE /rules/:id` and
+    `/templates/:id`, since api-gateway can't know a rule's or template's
+    tenant from the URL alone without an extra fetch. api-gateway got its
+    first-ever custom guard/decorator pair -- `@Roles(...)` +
+    `TenantRolesGuard` -- as a fast-fail wherever `tenantId` *is*
+    resolvable without a fetch (`body.tenantId`, `query.tenantId`, or
+    `params.id`), applied to `POST /rules`, `POST /templates`, `GET
+    /audit-logs`, and every tenant-management route, with role sets that
+    exactly mirror tenant-service's own `MANAGE_TENANT_ROLES`/owner-only
+    checks so the gateway can never reject something a service would
+    allow, or vice versa.
+
+    Verified live with a real owner + freshly-added member: member got
+    403 on `POST /rules`/`POST /templates`/`GET /audit-logs` while
+    reads/event-ingestion/own-audit-history stayed 200; promoted to
+    admin, those three now succeeded while owner-only actions (delete
+    tenant, change another member's role) still correctly 403'd;
+    demoted back to member and confirmed `PATCH`/`DELETE /rules/:id`
+    were blocked with "Insufficient tenant role" straight from
+    rule-engine-service itself -- proving the service-layer check, not
+    the gateway, is what actually protects those two routes. Owner
+    confirmed able to perform every action, and existing tenant-
+    management behavior (update/delete tenant, member management)
+    unchanged throughout. Full workspace build+lint clean.

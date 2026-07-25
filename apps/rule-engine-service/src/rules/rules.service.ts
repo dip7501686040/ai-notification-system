@@ -11,6 +11,10 @@ import type { UpdateRuleDto } from "./dto/update-rule.dto";
 const RULE_SEARCHABLE_FIELDS = ["name", "eventType"];
 const EXCHANGE = "platform";
 const AUDIT_CREATED_ROUTING_KEY = "audit.created";
+// Rules control automated dispatch -- meaningfully administrative, so
+// mutations are gated to owner/admin (mirrors tenant-service's own
+// MANAGE_TENANT_ROLES convention). Reads stay open to any member.
+const MANAGE_ROLES = ["owner", "admin"];
 
 @Injectable()
 export class RulesService extends BaseCrudService<
@@ -38,7 +42,7 @@ export class RulesService extends BaseCrudService<
       return super.create(requesterIdOrData);
     }
 
-    await this.assertMembership(dto!.tenantId, requesterIdOrData);
+    await this.assertMembership(dto!.tenantId, requesterIdOrData, false, MANAGE_ROLES);
 
     const rule = await super.create({
       tenantId: dto!.tenantId,
@@ -70,7 +74,7 @@ export class RulesService extends BaseCrudService<
 
   async updateRule(ruleId: string, requesterId: string, dto: UpdateRuleDto): Promise<Rule> {
     const rule = await this.getRuleOrThrow(ruleId);
-    await this.assertMembership(rule.tenantId, requesterId, true);
+    await this.assertMembership(rule.tenantId, requesterId, true, MANAGE_ROLES);
 
     const updated = await super.update(
       { id: ruleId },
@@ -89,7 +93,7 @@ export class RulesService extends BaseCrudService<
 
   async remove(ruleId: string, requesterId: string): Promise<void> {
     const rule = await this.getRuleOrThrow(ruleId);
-    await this.assertMembership(rule.tenantId, requesterId, true);
+    await this.assertMembership(rule.tenantId, requesterId, true, MANAGE_ROLES);
     await super.delete({ id: ruleId });
     await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
       action: "rule.deleted",
@@ -141,11 +145,14 @@ export class RulesService extends BaseCrudService<
 
   // notFoundOnFailure mirrors EventsService.findOne: a 403 would confirm
   // the rule exists to callers who aren't tenant members, so single-rule
-  // reads/writes 404 instead.
+  // reads/writes 404 instead. allowedRoles is a separate check on top --
+  // insufficient role is always a real 403 (the caller already knows the
+  // tenant exists, so nothing is leaked by saying so).
   private async assertMembership(
     tenantId: string,
     requesterId: string,
     notFoundOnFailure = false,
+    allowedRoles?: string[],
   ): Promise<void> {
     const result = await checkMembershipViaGrpc(env.TENANT_GRPC_ADDRESS, tenantId, requesterId);
     if (!result.isMember) {
@@ -153,6 +160,9 @@ export class RulesService extends BaseCrudService<
         throw new NotFoundException("Rule not found");
       }
       throw new ForbiddenException("Not a member of this tenant");
+    }
+    if (allowedRoles && !allowedRoles.includes(result.role)) {
+      throw new ForbiddenException("Insufficient tenant role");
     }
   }
 }

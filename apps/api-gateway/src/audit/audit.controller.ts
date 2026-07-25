@@ -5,6 +5,8 @@ import { listAuditLogsViaGrpc, listMyAuditLogsViaGrpc } from "@ai-notification/g
 import { grpcCall } from "../grpc-call";
 import { env } from "../env";
 import { GrpcAuthGuard, type AuthenticatedUser } from "../auth/grpc-auth.guard";
+import { TenantRolesGuard } from "../auth/tenant-roles.guard";
+import { Roles } from "../auth/roles.decorator";
 
 function currentUser(req: Request): AuthenticatedUser {
   return (req as Request & { user: AuthenticatedUser }).user;
@@ -22,8 +24,12 @@ function parseIntOrUndefined(value: string | undefined): number | undefined {
 // RabbitMQ consumer, same "no create/update/delete surface" shape as
 // ai.controller.ts/analytics.controller.ts.
 @Controller("audit-logs")
-@UseGuards(GrpcAuthGuard)
+@UseGuards(GrpcAuthGuard, TenantRolesGuard)
 export class AuditController {
+  // An audit trail is sensitive -- member-read is too broad. Gateway
+  // fast-fail (tenantId is in the query); audit-service's own
+  // AuditService re-checks it authoritatively.
+  @Roles("owner", "admin")
   @Get()
   list(
     @Req() req: Request,

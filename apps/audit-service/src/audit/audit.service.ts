@@ -7,6 +7,10 @@ import { env } from "../env";
 
 const AUDIT_SEARCHABLE_FIELDS = ["action", "targetType", "targetId"];
 const DEFAULT_DAYS = 30;
+// An audit trail (who logged in, who changed what) is sensitive --
+// member-read is too broad, gated to owner/admin (mirrors
+// tenant-service's own MANAGE_TENANT_ROLES convention).
+const MANAGE_ROLES = ["owner", "admin"];
 
 function cutoffDate(days?: number): Date {
   const windowDays = days && days > 0 ? days : DEFAULT_DAYS;
@@ -38,7 +42,7 @@ export class AuditService extends BaseCrudService<
     days?: number,
     action?: string,
   ): Promise<Paginated<AuditLog>> {
-    await this.assertMembership(tenantId, requesterId);
+    await this.assertMembership(tenantId, requesterId, MANAGE_ROLES);
     return this.list(
       query,
       { searchableFields: AUDIT_SEARCHABLE_FIELDS },
@@ -65,10 +69,17 @@ export class AuditService extends BaseCrudService<
     );
   }
 
-  private async assertMembership(tenantId: string, requesterId: string): Promise<void> {
+  private async assertMembership(
+    tenantId: string,
+    requesterId: string,
+    allowedRoles?: string[],
+  ): Promise<void> {
     const result = await checkMembershipViaGrpc(env.TENANT_GRPC_ADDRESS, tenantId, requesterId);
     if (!result.isMember) {
       throw new ForbiddenException("Not a member of this tenant");
+    }
+    if (allowedRoles && !allowedRoles.includes(result.role)) {
+      throw new ForbiddenException("Insufficient tenant role");
     }
   }
 }

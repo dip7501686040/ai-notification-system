@@ -9,6 +9,10 @@ import type { CreateTemplateDto } from "./dto/create-template.dto";
 import type { UpdateTemplateDto } from "./dto/update-template.dto";
 
 const TEMPLATE_SEARCHABLE_FIELDS = ["name", "channel"];
+// Templates control real notification content -- administrative, gated
+// to owner/admin (mirrors tenant-service's own MANAGE_TENANT_ROLES
+// convention). Reads stay open to any member.
+const MANAGE_ROLES = ["owner", "admin"];
 
 export interface RenderResult {
   found: boolean;
@@ -39,7 +43,7 @@ export class TemplatesService extends BaseCrudService<
       return super.create(requesterIdOrData);
     }
 
-    await this.assertMembership(dto!.tenantId, requesterIdOrData);
+    await this.assertMembership(dto!.tenantId, requesterIdOrData, false, MANAGE_ROLES);
 
     return super.create({
       tenantId: dto!.tenantId,
@@ -71,7 +75,7 @@ export class TemplatesService extends BaseCrudService<
     dto: UpdateTemplateDto,
   ): Promise<Template> {
     const template = await this.getTemplateOrThrow(templateId);
-    await this.assertMembership(template.tenantId, requesterId, true);
+    await this.assertMembership(template.tenantId, requesterId, true, MANAGE_ROLES);
 
     return super.update(
       { id: templateId },
@@ -86,7 +90,7 @@ export class TemplatesService extends BaseCrudService<
 
   async remove(templateId: string, requesterId: string): Promise<void> {
     const template = await this.getTemplateOrThrow(templateId);
-    await this.assertMembership(template.tenantId, requesterId, true);
+    await this.assertMembership(template.tenantId, requesterId, true, MANAGE_ROLES);
     await super.delete({ id: templateId });
   }
 
@@ -123,11 +127,13 @@ export class TemplatesService extends BaseCrudService<
 
   // notFoundOnFailure mirrors RulesService/NotificationsService's findOne:
   // a 403 would confirm the template exists to non-members, so single-
-  // template reads/writes 404 instead.
+  // template reads/writes 404 instead. allowedRoles is a separate check
+  // on top -- insufficient role is always a real 403.
   private async assertMembership(
     tenantId: string,
     requesterId: string,
     notFoundOnFailure = false,
+    allowedRoles?: string[],
   ): Promise<void> {
     const result = await checkMembershipViaGrpc(env.TENANT_GRPC_ADDRESS, tenantId, requesterId);
     if (!result.isMember) {
@@ -135,6 +141,9 @@ export class TemplatesService extends BaseCrudService<
         throw new NotFoundException("Template not found");
       }
       throw new ForbiddenException("Not a member of this tenant");
+    }
+    if (allowedRoles && !allowedRoles.includes(result.role)) {
+      throw new ForbiddenException("Insufficient tenant role");
     }
   }
 }

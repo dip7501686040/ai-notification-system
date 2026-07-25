@@ -23,6 +23,8 @@ import {
 import { grpcCall } from "../grpc-call";
 import { env } from "../env";
 import { GrpcAuthGuard, type AuthenticatedUser } from "../auth/grpc-auth.guard";
+import { TenantRolesGuard } from "../auth/tenant-roles.guard";
+import { Roles } from "../auth/roles.decorator";
 import { CreateTemplateDto } from "./dto/create-template.dto";
 import { UpdateTemplateDto } from "./dto/update-template.dto";
 
@@ -31,8 +33,12 @@ function currentUser(req: Request): AuthenticatedUser {
 }
 
 @Controller("templates")
-@UseGuards(GrpcAuthGuard)
+@UseGuards(GrpcAuthGuard, TenantRolesGuard)
 export class TemplatesController {
+  // Templates control real notification content -- administrative.
+  // Gateway fast-fail (tenantId is in the body); template-service's own
+  // TemplatesService re-checks it authoritatively.
+  @Roles("owner", "admin")
   @Post()
   create(@Req() req: Request, @Body() dto: CreateTemplateDto) {
     return grpcCall(() =>
