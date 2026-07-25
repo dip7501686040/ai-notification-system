@@ -2321,3 +2321,61 @@ Features
     `GET`/`PATCH .../read` over REST afterward. Standard 400/401/403/404
     authorization edges on `/templates` re-checked, and port 8008 accepts
     no direct connections. Full workspace build+lint clean.
+
+16. ✅ Analytics Service (fourth/fifth/sixth RabbitMQ consumer, daily
+    aggregate stats for FR-8's historical dashboard).
+    The Communication Matrix has every service fire-and-forget into
+    Analytics Service over the event bus ("Stream processing," never
+    blocking production traffic), with its own `analytics_db` per the
+    Database Strategy section. Rather than storing raw events -- which
+    would just duplicate event-service/notification-service's own tables
+    and violate "database per service, no cross-service joins" -- it
+    consumes `event.created`/`notification.sent`/`notification.dead` off
+    the existing `platform` exchange and turns them into daily `upsert`
+    counters (`DailyEventStat` keyed by `tenantId/date/eventType/source`,
+    `DailyNotificationStat` keyed by `tenantId/date/channel`), read back
+    through three aggregate endpoints mapping directly onto FR-8's
+    "Historical" bullets: `GET /analytics/daily-events`, `GET
+    /analytics/top-sources`, `GET /analytics/notifications` (success rate
+    + an explicitly-estimated cost, computed at query time from a
+    `CHANNEL_COST_JSON` env var since no cost/pricing concept exists
+    anywhere else in the codebase). Deliberately left out FR-8's "Real
+    Time" bullets (Active Events, Failed Notifications, AI Suggestions,
+    Event Timeline) -- those are just the dashboard querying
+    event-service/notification-service/ai-service's own existing
+    endpoints directly, nothing new to build there.
+
+    Real end-to-end verification (posting real events through the actual
+    event -> rule -> notification -> channel pipeline, not synthetic
+    RabbitMQ messages) caught a genuine bug the first synthetic-message
+    pass had missed: the dashboard channel never publishes
+    `notification.sent` at all -- it's fire-and-forget, publishing
+    `notification.dashboard.push` instead (see #14) and updating its own
+    status directly. Analytics Service was silently missing the entire
+    dashboard channel from every notification stat as a result. Fixed by
+    adding a fourth consumer bound to `notification.dashboard.push`,
+    counted as a `sent` event for the `dashboard` channel -- confirmed
+    live afterward with a fresh dashboard-channel notification correctly
+    appearing in the stats.
+
+    Also surfaced mid-build: bringing up ~10 services at once for a live
+    verification pass overloaded the user's machine badly enough to
+    require killing Docker Desktop entirely -- verification going forward
+    uses the minimal service set actually needed for whatever's under
+    test (here: analytics-service + api-gateway + auth, with the
+    RabbitMQ-consuming pipeline services added deliberately for the
+    real-pipeline re-test rather than assumed by default), brought up a
+    few at a time rather than one large parallel build.
+
+    Verified live twice: once via synthetic messages published directly
+    onto RabbitMQ (`event.created`/`notification.sent`/`notification.dead`
+    with varied types/sources/channels) to confirm the aggregation math in
+    isolation; once via the real pipeline end-to-end (three rules across
+    all three channels -- dashboard, email, webhook -- the webhook
+    deliberately unreachable to drive a real `dead_letter` through the
+    actual retry backoff, not a shortcut). Both passes' arithmetic checked
+    out exactly against what was posted (daily counts, top-source
+    ordering, per-channel sent/failed, success rate, estimated cost).
+    Standard 400/401/403 authorization edges (missing `tenantId`,
+    missing/bad token, non-member tenant), port 8009 accepting no direct
+    connections, and full workspace build+lint clean.

@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package analytics.v1;
+
+// Read-only aggregate queries -- no CRUD, these rows are entirely
+// system-computed from consumed RabbitMQ events, never written by a
+// caller. `days`/`limit` of 0 means "use the service's default" (proto3
+// can't distinguish "not provided" from 0 for numeric fields).
+
+message DailyEventCountMessage {
+  string date = 1;
+  int32 count = 2;
+}
+
+message GetDailyEventsRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  int32 days = 3;
+}
+
+message GetDailyEventsResponse {
+  repeated DailyEventCountMessage list = 1;
+}
+
+message SourceCountMessage {
+  string source = 1;
+  int32 count = 2;
+}
+
+message GetTopSourcesRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  int32 days = 3;
+  int32 limit = 4;
+}
+
+message GetTopSourcesResponse {
+  repeated SourceCountMessage list = 1;
+}
+
+message ChannelStatMessage {
+  string channel = 1;
+  int32 sent = 2;
+  int32 failed = 3;
+  double estimated_cost = 4;
+}
+
+message GetNotificationStatsRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  int32 days = 3;
+}
+
+message GetNotificationStatsResponse {
+  repeated ChannelStatMessage by_channel = 1;
+  int32 total_sent = 2;
+  int32 total_failed = 3;
+  double success_rate = 4;
+  double total_estimated_cost = 5;
+}
+
+service Analytics {
+  rpc GetDailyEvents(GetDailyEventsRequest) returns (GetDailyEventsResponse);
+  rpc GetTopSources(GetTopSourcesRequest) returns (GetTopSourcesResponse);
+  rpc GetNotificationStats(GetNotificationStatsRequest) returns (GetNotificationStatsResponse);
+}

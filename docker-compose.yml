@@ -168,6 +168,7 @@ services:
       NOTIFICATION_GRPC_ADDRESS: notification-service:50157
       AI_GRPC_ADDRESS: ai-service:50155
       TEMPLATE_GRPC_ADDRESS: template-service:50159
+      ANALYTICS_GRPC_ADDRESS: analytics-service:50160
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDIS_URL: redis://redis:6379
     ports:
@@ -400,8 +401,18 @@ services:
     environment:
       <<: *nest-env
       PORT: "8009"
-    ports:
-      - "8009:8009"
+      ANALYTICS_GRPC_PORT: "50160"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/analytics_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+      CHANNEL_COST_JSON: '{"email":0.0001,"webhook":0,"dashboard":0}'
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   audit-service:
     <<: *nest-defaults

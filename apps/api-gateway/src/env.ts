@@ -10,6 +10,7 @@ const schema = z.object({
   RULE_ENGINE_GRPC_ADDRESS: z.string().default("rule-engine-service:50156"),
   NOTIFICATION_GRPC_ADDRESS: z.string().default("notification-service:50157"),
   TEMPLATE_GRPC_ADDRESS: z.string().default("template-service:50159"),
+  ANALYTICS_GRPC_ADDRESS: z.string().default("analytics-service:50160"),
   AI_GRPC_ADDRESS: z.string().default("ai-service:50155"),
   RABBITMQ_URL: z.string().default("amqp://guest:guest@rabbitmq:5672"),
   REDIS_URL: z.string().default("redis://redis:6379"),

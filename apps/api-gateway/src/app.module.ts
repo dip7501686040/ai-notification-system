@@ -13,6 +13,7 @@ import { EventsController } from "./events/events.controller";
 import { RulesController } from "./rules/rules.controller";
 import { TemplatesController } from "./templates/templates.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
+import { AnalyticsController } from "./analytics/analytics.controller";
 import { NotificationsGateway } from "./notifications/notifications.gateway";
 import { NotificationPushConsumerService } from "./notifications/notification-push-consumer.service";
 import { AiController } from "./ai/ai.controller";
@@ -30,6 +31,7 @@ const controllers: Type<unknown>[] = [
   TemplatesController,
   NotificationsController,
   AiController,
+  AnalyticsController,
 ];
 const providers: Type<unknown>[] = [NotificationsGateway, NotificationPushConsumerService];
 
