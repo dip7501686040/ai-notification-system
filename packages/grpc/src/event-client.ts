@@ -173,3 +173,27 @@ export async function getEventViaGrpc(
     client.close();
   }
 }
+
+// Internal-only (no requesterId) -- tenantId here is the already-trusted
+// tenant resolved from a validated API key, never a client-supplied value.
+export async function ingestEventViaApiKeyGrpc(
+  address: string,
+  tenantId: string,
+  data: { type: string; source?: string; payload: unknown },
+): Promise<EventResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { tenant_id: string; type: string; source: string; payload_json: string },
+      EventWireMessage
+    >(client, "IngestViaApiKey", {
+      tenant_id: tenantId,
+      type: data.type,
+      source: data.source ?? "",
+      payload_json: JSON.stringify(data.payload),
+    });
+    return toEventResult(response);
+  } finally {
+    client.close();
+  }
+}

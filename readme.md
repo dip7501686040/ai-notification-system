@@ -2490,3 +2490,64 @@ Features
     confirmed able to perform every action, and existing tenant-
     management behavior (update/delete tenant, member management)
     unchanged throughout. Full workspace build+lint clean.
+
+19. ✅ FR-10 API Management: API Keys (create/rotate/revoke) + rate
+    limiting -- the last backend FR, closing out the full PRD except
+    prediction-service (deliberately deferred).
+    A full audit against the PRD's FR list, run before starting frontend
+    work, found every backend service built and live-verified except
+    FR-10 ("Create API Keys, Rotate Keys, Revoke Keys, Set Rate Limits"),
+    also named in the Security NFR alongside JWT/OAuth2/RBAC (all done).
+    Per the PRD, API Keys belong to **tenant management** ("Each tenant
+    has ... API Keys," FR-2) and are validated at the **API Gateway**
+    ("API Gateway Responsibilities: Authentication -> Rate Limiting ->
+    API Key Validation -> ... -> Routing"). Scoped narrowly to
+    authenticating external `POST /events` calls without a dashboard
+    user's JWT (FR-1's own acceptance criteria list "Validate API Key"
+    specifically for ingestion) -- not a general-purpose credential for
+    every endpoint.
+
+    `ApiKey` (new `tenant_db` model: `keyPrefix`/`keyHash`/`rateLimit`/
+    `revoked`/`lastUsedAt`) reuses the exact secret-hashing pattern
+    identity-service's password-reset tokens already established
+    (`crypto.createHash("sha256")`, looked up by hash, raw value never
+    stored). The raw key (`ntf_<32 hex>`) is returned exactly once, at
+    create or rotate time. tenant-service needed first-time RabbitMQ
+    wiring (same bootstrap identity-service got in the audit-service
+    pass) so `ApiKeysService` could publish `audit.created` on
+    create/rotate/revoke -- closing the "API Key Created" FR-9 gap that
+    was explicitly skipped as unbuildable when audit-service was built.
+
+    `EventsController`'s `create()` now accepts *either* auth mode: an
+    `X-API-Key` header validates via a new internal `ValidateApiKey`
+    RPC and checks a Redis-backed fixed-window rate limiter (reusing the
+    `redis` client already a dependency for the Socket.IO adapter, no
+    new package); its absence falls through unchanged to the existing
+    JWT `GrpcAuthGuard` (injected into the new guard, not duplicated).
+    Event-service's new `ingestViaApiKey()` path deliberately skips the
+    membership check entirely -- there's no user identity to check
+    membership for, the key's own validation already proved
+    authorization for exactly one tenant -- and api-gateway always uses
+    that trusted, key-resolved tenantId over whatever the request body
+    claims, so a key scoped to tenant A can never post events as tenant
+    B. RBAC (just built) covers the rest directly: `POST`/`GET /apikeys`
+    get the gateway's `@Roles("owner","admin")` fast-fail (tenantId is
+    directly in the body/query); rotate/revoke-by-id have no gateway
+    guard (same round-trip limitation as `PATCH`/`DELETE /rules/:id`),
+    so tenant-service's own `ApiKeysService` is the sole, authoritative
+    enforcement there.
+
+    Verified live: created a key, confirmed the raw value is returned
+    once and the list endpoint only ever shows `keyPrefix`; posted an
+    event with `X-API-Key` and a deliberately mismatched `tenantId` in
+    the body -- confirmed the event landed under the key's real tenant,
+    not the spoofed one; exceeded a `rateLimit: 3` key's budget and got
+    429 on the 4th/5th request; revoked a key and confirmed immediate
+    401; rotated a different key and confirmed the old raw value 401s
+    while the new one works; confirmed a plain member gets 403 on all
+    four API-key routes (two from the gateway, two -- rotate/revoke --
+    with "Insufficient tenant role" straight from tenant-service itself);
+    confirmed `apikey.created`/`apikey.rotated`/`apikey.revoked` all
+    appear correctly in `/audit-logs`; confirmed the existing
+    JWT-authenticated `POST`/`GET /events` paths are completely
+    unaffected. Full workspace build+lint clean.

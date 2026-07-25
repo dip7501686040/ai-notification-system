@@ -15,9 +15,12 @@ import { TemplatesController } from "./templates/templates.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
 import { AnalyticsController } from "./analytics/analytics.controller";
 import { AuditController } from "./audit/audit.controller";
+import { ApiKeysController } from "./api-keys/api-keys.controller";
 import { NotificationsGateway } from "./notifications/notifications.gateway";
 import { NotificationPushConsumerService } from "./notifications/notification-push-consumer.service";
 import { AiController } from "./ai/ai.controller";
+import { GrpcAuthGuard } from "./auth/grpc-auth.guard";
+import { ApiKeyRateLimiterService } from "./auth/api-key-rate-limiter.service";
 import { env, isGoogleOAuthConfigured } from "./env";
 
 const controllers: Type<unknown>[] = [
@@ -34,8 +37,14 @@ const controllers: Type<unknown>[] = [
   AiController,
   AnalyticsController,
   AuditController,
+  ApiKeysController,
 ];
-const providers: Type<unknown>[] = [NotificationsGateway, NotificationPushConsumerService];
+const providers: Type<unknown>[] = [
+  NotificationsGateway,
+  NotificationPushConsumerService,
+  GrpcAuthGuard,
+  ApiKeyRateLimiterService,
+];
 
 if (isGoogleOAuthConfigured) {
   controllers.push(GoogleAuthController);

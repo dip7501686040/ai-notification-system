@@ -1,8 +1,9 @@
 import { Controller } from "@nestjs/common";
 import { GrpcMethod } from "@nestjs/microservices";
 import type { RawListQuery } from "@ai-notification/common";
-import type { Tenant, TenantMember } from "../../../generated/prisma-client";
+import type { ApiKey, Tenant, TenantMember } from "../../../generated/prisma-client";
 import { TenantsService } from "../tenants.service";
+import { ApiKeysService } from "../api-keys.service";
 import type { TenantRole } from "../dto/add-member.dto";
 
 interface GetTenantRequest {
@@ -131,6 +132,69 @@ interface RemoveMemberRequest {
   user_id: string;
 }
 
+interface ApiKeyMessage {
+  id: string;
+  tenant_id: string;
+  name: string;
+  key_prefix: string;
+  rate_limit: number;
+  revoked: boolean;
+  last_used_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CreateApiKeyRequest {
+  requester_id: string;
+  tenant_id: string;
+  name: string;
+  rate_limit: number;
+}
+
+interface CreateApiKeyResponse {
+  api_key: ApiKeyMessage;
+  raw_key: string;
+}
+
+interface ListApiKeysRequest {
+  requester_id: string;
+  tenant_id: string;
+  query: ListQueryMessage;
+}
+
+interface ListApiKeysResponse {
+  list: ApiKeyMessage[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface RotateApiKeyRequest {
+  requester_id: string;
+  api_key_id: string;
+}
+
+interface RotateApiKeyResponse {
+  api_key: ApiKeyMessage;
+  raw_key: string;
+}
+
+interface RevokeApiKeyRequest {
+  requester_id: string;
+  api_key_id: string;
+}
+
+interface ValidateApiKeyRequest {
+  raw_key: string;
+}
+
+interface ValidateApiKeyResponse {
+  valid: boolean;
+  tenant_id: string;
+  api_key_id: string;
+  rate_limit: number;
+}
+
 function toTenantMessage(tenant: Tenant): TenantMessage {
   return {
     id: tenant.id,
@@ -154,6 +218,20 @@ function toMemberMessage(member: TenantMember): MemberMessage {
   };
 }
 
+function toApiKeyMessage(apiKey: ApiKey): ApiKeyMessage {
+  return {
+    id: apiKey.id,
+    tenant_id: apiKey.tenantId,
+    name: apiKey.name,
+    key_prefix: apiKey.keyPrefix,
+    rate_limit: apiKey.rateLimit,
+    revoked: apiKey.revoked,
+    last_used_at: apiKey.lastUsedAt ? apiKey.lastUsedAt.toISOString() : "",
+    created_at: apiKey.createdAt.toISOString(),
+    updated_at: apiKey.updatedAt.toISOString(),
+  };
+}
+
 function toRawListQuery(query: ListQueryMessage | undefined): RawListQuery {
   return {
     page: query?.page || undefined,
@@ -166,7 +244,10 @@ function toRawListQuery(query: ListQueryMessage | undefined): RawListQuery {
 
 @Controller()
 export class TenantGrpcController {
-  constructor(private readonly tenantsService: TenantsService) {}
+  constructor(
+    private readonly tenantsService: TenantsService,
+    private readonly apiKeysService: ApiKeysService,
+  ) {}
 
   @GrpcMethod("Tenant", "GetTenant")
   async getTenant(data: GetTenantRequest): Promise<GetTenantResponse> {
@@ -268,5 +349,57 @@ export class TenantGrpcController {
   async removeMember(data: RemoveMemberRequest): Promise<SuccessResponse> {
     await this.tenantsService.removeMember(data.tenant_id, data.requester_id, data.user_id);
     return { success: true };
+  }
+
+  @GrpcMethod("Tenant", "CreateApiKey")
+  async createApiKey(data: CreateApiKeyRequest): Promise<CreateApiKeyResponse> {
+    const { apiKey, rawKey } = await this.apiKeysService.createKey(
+      data.tenant_id,
+      data.requester_id,
+      {
+        tenantId: data.tenant_id,
+        name: data.name,
+        rateLimit: data.rate_limit || undefined,
+      },
+    );
+    return { api_key: toApiKeyMessage(apiKey), raw_key: rawKey };
+  }
+
+  @GrpcMethod("Tenant", "ListApiKeys")
+  async listApiKeys(data: ListApiKeysRequest): Promise<ListApiKeysResponse> {
+    const result = await this.apiKeysService.findAllForTenant(
+      data.tenant_id,
+      data.requester_id,
+      toRawListQuery(data.query),
+    );
+    return {
+      list: result.list.map(toApiKeyMessage),
+      total: result.total,
+      page: result.page,
+      page_size: result.pageSize,
+    };
+  }
+
+  @GrpcMethod("Tenant", "RotateApiKey")
+  async rotateApiKey(data: RotateApiKeyRequest): Promise<RotateApiKeyResponse> {
+    const { apiKey, rawKey } = await this.apiKeysService.rotate(data.api_key_id, data.requester_id);
+    return { api_key: toApiKeyMessage(apiKey), raw_key: rawKey };
+  }
+
+  @GrpcMethod("Tenant", "RevokeApiKey")
+  async revokeApiKey(data: RevokeApiKeyRequest): Promise<SuccessResponse> {
+    await this.apiKeysService.revoke(data.api_key_id, data.requester_id);
+    return { success: true };
+  }
+
+  @GrpcMethod("Tenant", "ValidateApiKey")
+  async validateApiKey(data: ValidateApiKeyRequest): Promise<ValidateApiKeyResponse> {
+    const result = await this.apiKeysService.validate(data.raw_key);
+    return {
+      valid: result.valid,
+      tenant_id: result.tenantId ?? "",
+      api_key_id: result.apiKeyId ?? "",
+      rate_limit: result.rateLimit ?? 0,
+    };
   }
 }

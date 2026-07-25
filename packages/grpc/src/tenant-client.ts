@@ -441,3 +441,179 @@ export async function removeMemberViaGrpc(
     client.close();
   }
 }
+
+export interface ApiKeyResult {
+  id: string;
+  tenantId: string;
+  name: string;
+  keyPrefix: string;
+  rateLimit: number;
+  revoked: boolean;
+  lastUsedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatedApiKeyResult {
+  apiKey: ApiKeyResult;
+  rawKey: string;
+}
+
+export interface ValidateApiKeyResult {
+  valid: boolean;
+  tenantId: string;
+  apiKeyId: string;
+  rateLimit: number;
+}
+
+interface ApiKeyWireMessage {
+  id: string;
+  tenant_id: string;
+  name: string;
+  key_prefix: string;
+  rate_limit: number;
+  revoked: boolean;
+  last_used_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CreateOrRotateApiKeyWireResponse {
+  api_key: ApiKeyWireMessage;
+  raw_key: string;
+}
+
+interface ListApiKeysWireResponse {
+  list: ApiKeyWireMessage[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface ValidateApiKeyWireResponse {
+  valid: boolean;
+  tenant_id: string;
+  api_key_id: string;
+  rate_limit: number;
+}
+
+function toApiKeyResult(wire: ApiKeyWireMessage): ApiKeyResult {
+  return {
+    id: wire.id,
+    tenantId: wire.tenant_id,
+    name: wire.name,
+    keyPrefix: wire.key_prefix,
+    rateLimit: wire.rate_limit,
+    revoked: wire.revoked,
+    lastUsedAt: wire.last_used_at,
+    createdAt: wire.created_at,
+    updatedAt: wire.updated_at,
+  };
+}
+
+export async function createApiKeyViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+  data: { name: string; rateLimit?: number },
+): Promise<CreatedApiKeyResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; tenant_id: string; name: string; rate_limit: number },
+      CreateOrRotateApiKeyWireResponse
+    >(client, "CreateApiKey", {
+      requester_id: requesterId,
+      tenant_id: tenantId,
+      name: data.name,
+      rate_limit: data.rateLimit ?? 0,
+    });
+    return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
+  } finally {
+    client.close();
+  }
+}
+
+export async function listApiKeysViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+  query: ListQueryParams,
+): Promise<PaginatedResult<ApiKeyResult>> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+      ListApiKeysWireResponse
+    >(client, "ListApiKeys", {
+      requester_id: requesterId,
+      tenant_id: tenantId,
+      query: toQueryWire(query),
+    });
+    return {
+      list: response.list.map(toApiKeyResult),
+      total: response.total,
+      page: response.page,
+      pageSize: response.page_size,
+    };
+  } finally {
+    client.close();
+  }
+}
+
+export async function rotateApiKeyViaGrpc(
+  address: string,
+  requesterId: string,
+  apiKeyId: string,
+): Promise<CreatedApiKeyResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; api_key_id: string },
+      CreateOrRotateApiKeyWireResponse
+    >(client, "RotateApiKey", { requester_id: requesterId, api_key_id: apiKeyId });
+    return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
+  } finally {
+    client.close();
+  }
+}
+
+export async function revokeApiKeyViaGrpc(
+  address: string,
+  requesterId: string,
+  apiKeyId: string,
+): Promise<void> {
+  const client = createClient(address);
+  try {
+    await callUnary<{ requester_id: string; api_key_id: string }, SuccessWireResponse>(
+      client,
+      "RevokeApiKey",
+      { requester_id: requesterId, api_key_id: apiKeyId },
+    );
+  } finally {
+    client.close();
+  }
+}
+
+// Internal-only (no requesterId) -- called by api-gateway's guard.
+export async function validateApiKeyViaGrpc(
+  address: string,
+  rawKey: string,
+): Promise<ValidateApiKeyResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<{ raw_key: string }, ValidateApiKeyWireResponse>(
+      client,
+      "ValidateApiKey",
+      { raw_key: rawKey },
+    );
+    return {
+      valid: response.valid,
+      tenantId: response.tenant_id,
+      apiKeyId: response.api_key_id,
+      rateLimit: response.rate_limit,
+    };
+  } finally {
+    client.close();
+  }
+}

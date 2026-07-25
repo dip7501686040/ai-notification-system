@@ -31,9 +31,20 @@ export class EventsService extends BaseCrudService<
 
   async ingest(userId: string, dto: CreateEventDto): Promise<Event> {
     await this.assertMembership(dto.tenantId, userId);
+    return this.ingestForTenant(dto.tenantId, dto);
+  }
 
+  // Used when api-gateway has already authenticated the caller via an API
+  // key -- tenantId is the key's own (already-trusted) tenant, not a
+  // requester to check membership for. No user identity exists on this
+  // path at all.
+  async ingestViaApiKey(tenantId: string, dto: Omit<CreateEventDto, "tenantId">): Promise<Event> {
+    return this.ingestForTenant(tenantId, { ...dto, tenantId });
+  }
+
+  private async ingestForTenant(tenantId: string, dto: CreateEventDto): Promise<Event> {
     const event = await super.create({
-      tenantId: dto.tenantId,
+      tenantId,
       type: dto.type,
       source: dto.source,
       payload: dto.payload as Prisma.InputJsonValue,

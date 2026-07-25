@@ -48,8 +48,19 @@ message GetEventRequest {
   string event_id = 2;
 }
 
+// Internal-only (no requester_id) -- used when api-gateway has already
+// authenticated the caller via an API key (tenant_id comes from the
+// validated key, never the client-supplied request body).
+message IngestViaApiKeyRequest {
+  string tenant_id = 1;
+  string type = 2;
+  string source = 3;
+  string payload_json = 4;
+}
+
 service Event {
   rpc CreateEvent(CreateEventRequest) returns (EventMessage);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc GetEvent(GetEventRequest) returns (EventMessage);
+  rpc IngestViaApiKey(IngestViaApiKeyRequest) returns (EventMessage);
 }

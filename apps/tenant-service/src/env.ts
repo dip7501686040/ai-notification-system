@@ -7,6 +7,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   DATABASE_URL: z.string(),
   IDENTITY_AUTH_GRPC_ADDRESS: z.string().default("identity-service:50152"),
+  RABBITMQ_URL: z.string().default("amqp://guest:guest@rabbitmq:5672"),
 });
 
 export const env = loadEnv(schema);

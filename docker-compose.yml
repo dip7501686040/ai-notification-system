@@ -218,10 +218,13 @@ services:
       TENANT_GRPC_PORT: "50153"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tenant_db
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       otel-collector:
         condition: service_started
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   event-service:

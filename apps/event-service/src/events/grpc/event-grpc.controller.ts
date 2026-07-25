@@ -48,6 +48,13 @@ interface GetEventRequest {
   event_id: string;
 }
 
+interface IngestViaApiKeyRequest {
+  tenant_id: string;
+  type: string;
+  source: string;
+  payload_json: string;
+}
+
 function toEventMessage(event: Event): EventMessage {
   return {
     id: event.id,
@@ -103,6 +110,16 @@ export class EventGrpcController {
   @GrpcMethod("Event", "GetEvent")
   async getEvent(data: GetEventRequest): Promise<EventMessage> {
     const event = await this.eventsService.findOne(data.event_id, data.requester_id);
+    return toEventMessage(event);
+  }
+
+  @GrpcMethod("Event", "IngestViaApiKey")
+  async ingestViaApiKey(data: IngestViaApiKeyRequest): Promise<EventMessage> {
+    const event = await this.eventsService.ingestViaApiKey(data.tenant_id, {
+      type: data.type,
+      source: data.source || undefined,
+      payload: data.payload_json ? JSON.parse(data.payload_json) : {},
+    });
     return toEventMessage(event);
   }
 }
