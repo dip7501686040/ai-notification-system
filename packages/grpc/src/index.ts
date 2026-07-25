@@ -11,6 +11,7 @@ export * from "./ai-client";
 export * from "./channel-client";
 export * from "./template-client";
 export * from "./analytics-client";
+export * from "./audit-client";
 export * from "./call-unary";
 export * from "./grpc-exception.filter";
 export * from "./grpc-error";

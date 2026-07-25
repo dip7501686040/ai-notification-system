@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package audit.v1;
+
+// Read-only -- every row is written internally by AuditConsumerService
+// off the event bus, never by a caller. No create/update/delete RPCs.
+
+message AuditLogMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string actor_id = 3;
+  string action = 4;
+  string target_type = 5;
+  string target_id = 6;
+  string metadata_json = 7;
+  string created_at = 8;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+// days of 0 means "use the service's default" (proto3 can't distinguish
+// "not provided" from 0 for numeric fields).
+message ListAuditLogsRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+  int32 days = 4;
+  string action = 5;
+}
+
+message ListAuditLogsResponse {
+  repeated AuditLogMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListMyAuditLogsRequest {
+  string requester_id = 1;
+  ListQuery query = 2;
+  int32 days = 3;
+}
+
+service Audit {
+  rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
+  rpc ListMyAuditLogs(ListMyAuditLogsRequest) returns (ListAuditLogsResponse);
+}

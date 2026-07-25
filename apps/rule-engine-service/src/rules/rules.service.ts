@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import { checkMembershipViaGrpc } from "@ai-notification/grpc";
+import { RabbitMQService } from "@ai-notification/rabbitmq";
 import type { Prisma, Rule } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env } from "../env";
@@ -8,6 +9,8 @@ import type { CreateRuleDto } from "./dto/create-rule.dto";
 import type { UpdateRuleDto } from "./dto/update-rule.dto";
 
 const RULE_SEARCHABLE_FIELDS = ["name", "eventType"];
+const EXCHANGE = "platform";
+const AUDIT_CREATED_ROUTING_KEY = "audit.created";
 
 @Injectable()
 export class RulesService extends BaseCrudService<
@@ -18,7 +21,10 @@ export class RulesService extends BaseCrudService<
   Prisma.RuleWhereInput,
   Prisma.RuleOrderByWithRelationInput
 > {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rabbitmq: RabbitMQService,
+  ) {
     super(prisma.rule);
   }
 
@@ -34,7 +40,7 @@ export class RulesService extends BaseCrudService<
 
     await this.assertMembership(dto!.tenantId, requesterIdOrData);
 
-    return super.create({
+    const rule = await super.create({
       tenantId: dto!.tenantId,
       name: dto!.name,
       eventType: dto!.eventType,
@@ -42,6 +48,9 @@ export class RulesService extends BaseCrudService<
       actions: dto!.actions as Prisma.InputJsonValue,
       enabled: dto!.enabled ?? true,
     });
+
+    await this.publishAudit("rule.created", rule, requesterIdOrData);
+    return rule;
   }
 
   async findAllForTenant(
@@ -63,7 +72,7 @@ export class RulesService extends BaseCrudService<
     const rule = await this.getRuleOrThrow(ruleId);
     await this.assertMembership(rule.tenantId, requesterId, true);
 
-    return super.update(
+    const updated = await super.update(
       { id: ruleId },
       {
         name: dto.name,
@@ -73,12 +82,23 @@ export class RulesService extends BaseCrudService<
         enabled: dto.enabled,
       },
     );
+
+    await this.publishAudit("rule.updated", updated, requesterId);
+    return updated;
   }
 
   async remove(ruleId: string, requesterId: string): Promise<void> {
     const rule = await this.getRuleOrThrow(ruleId);
     await this.assertMembership(rule.tenantId, requesterId, true);
     await super.delete({ id: ruleId });
+    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+      action: "rule.deleted",
+      tenantId: rule.tenantId,
+      actorId: requesterId,
+      targetType: "rule",
+      targetId: rule.id,
+      metadata: {},
+    });
   }
 
   // Used by RuleConsumerService, not exposed over gRPC -- no requester to
@@ -90,6 +110,24 @@ export class RulesService extends BaseCrudService<
         enabled: true,
         OR: [{ eventType }, { eventType: "*" }],
       },
+    });
+  }
+
+  // FR-9 audit logging (Audit Service): fire-and-forget, mirrors the
+  // shape AuditConsumerService expects for the generic `audit.created`
+  // event -- rule.created/updated write the same metadata shape.
+  private async publishAudit(
+    action: "rule.created" | "rule.updated",
+    rule: Rule,
+    actorId: string,
+  ): Promise<void> {
+    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+      action,
+      tenantId: rule.tenantId,
+      actorId,
+      targetType: "rule",
+      targetId: rule.id,
+      metadata: { name: rule.name, eventType: rule.eventType },
     });
   }
 

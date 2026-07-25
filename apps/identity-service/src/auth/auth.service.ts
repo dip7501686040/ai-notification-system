@@ -3,11 +3,14 @@ import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/co
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { createLogger } from "@ai-notification/logger";
+import { RabbitMQService } from "@ai-notification/rabbitmq";
 import type { User } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 
 const logger = createLogger("identity-service");
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const EXCHANGE = "platform";
+const AUDIT_CREATED_ROUTING_KEY = "audit.created";
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -39,6 +42,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly rabbitmq: RabbitMQService,
   ) {}
 
   async register(email: string, password: string, name?: string): Promise<AuthResult> {
@@ -65,6 +69,18 @@ export class AuthService {
     if (!isValid) {
       throw new UnauthorizedException("Invalid credentials");
     }
+
+    // FR-9 audit logging (Audit Service): fire-and-forget, generic
+    // `audit.created` event -- identity-service has no other RabbitMQ
+    // producer/consumer, this is its first use of the bus.
+    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+      action: "user.login",
+      tenantId: null,
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      metadata: { email: user.email },
+    });
 
     return { user: toSafeUser(user), accessToken: this.issueToken(user) };
   }

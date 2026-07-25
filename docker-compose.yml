@@ -169,6 +169,7 @@ services:
       AI_GRPC_ADDRESS: ai-service:50155
       TEMPLATE_GRPC_ADDRESS: template-service:50159
       ANALYTICS_GRPC_ADDRESS: analytics-service:50160
+      AUDIT_GRPC_ADDRESS: audit-service:50161
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDIS_URL: redis://redis:6379
     ports:
@@ -195,10 +196,13 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/identity_db
       JWT_SECRET: dev-only-insecure-jwt-secret-change-in-production
       JWT_EXPIRES_IN: 1h
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       otel-collector:
         condition: service_started
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   tenant-service:
@@ -424,8 +428,17 @@ services:
     environment:
       <<: *nest-env
       PORT: "8010"
-    ports:
-      - "8010:8010"
+      AUDIT_GRPC_PORT: "50161"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/audit_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TENANT_GRPC_ADDRESS: tenant-service:50153
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   # ---------------------------------------------------------------------
   # App services (Python)

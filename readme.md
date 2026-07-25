@@ -2379,3 +2379,59 @@ Features
     Standard 400/401/403 authorization edges (missing `tenantId`,
     missing/bad token, non-member tenant), port 8009 accepting no direct
     connections, and full workspace build+lint clean.
+
+17. ✅ Audit Service (third/fourth/fifth consumer on `platform`, FR-9
+    logging across five services).
+    FR-9 names five audit examples: User Login, API Key Created, Rule
+    Updated, Notification Sent, AI Decision Generated. API Key Created
+    was skipped outright -- a full grep confirmed API keys are FR-10 and
+    were never built, nothing exists to hook into. Of the remaining four,
+    two already flow through the `platform` exchange unchanged
+    (`notification.sent`, `event.ai.completed` -- audit-service just
+    binds to them, same as analytics-service). The other two -- rule
+    CRUD and login -- published nothing at all before this pass, so
+    unlike analytics-service this required adding small publish calls to
+    two other services rather than only writing a new consumer.
+
+    Rather than inventing a bespoke routing key per new action, both
+    reuse one generic `audit.created` event (the exact name already
+    sitting in the PRD's own RabbitMQ exchange list), shaped
+    `{action, tenantId, actorId, targetType, targetId, metadata}`:
+    `rules.service.ts`'s `create`/`updateRule`/`remove` now each publish
+    it (`rule.created`/`rule.updated`/`rule.deleted`, actor = the
+    requester); identity-service's `auth.service.ts` publishes it once,
+    from `login()` only -- not `register()` or OAuth, matching FR-9's
+    literal "User Login" wording rather than guessing whether account
+    creation counts. identity-service had zero RabbitMQ usage before this
+    (no dependency, no `RABBITMQ_URL`, no `RabbitMQModule` import) -- this
+    is its first-ever use of the bus.
+
+    `AuditLog` rows are deliberately generic (`tenantId`/`actorId`
+    nullable, `action`/`targetType`/`targetId`/`metadata`) rather than one
+    table per action type, since every FR-9 example reduces to the same
+    shape. Two read endpoints cover the two real scoping cases: `GET
+    /audit-logs?tenantId=&days=&action=` (tenant-membership gated, shows
+    everything -- human and system-caused -- inside that tenant) and `GET
+    /audit-logs/me?days=` (no tenant check needed at all -- `actorId =
+    requester` alone is sufficient authorization, and naturally covers
+    both a user's own logins *and* their own rule changes across every
+    tenant they belong to, in one query).
+
+    Also carried over explicitly from the last session's feedback: never
+    bring up many services in one large parallel `docker compose
+    --build`. Every container in this pass was rebuilt and health-checked
+    one or two at a time.
+
+    Verified live: registered and logged in a real test user -- confirmed
+    a `user.login` row via `/audit-logs/me` (and confirmed registration
+    alone produced *no* row, matching the login-only scope). Created,
+    renamed, and deleted a real rule through the REST API -- all three
+    `rule.created`/`rule.updated`/`rule.deleted` rows appeared correctly
+    in `/audit-logs?tenantId=`. Published synthetic `notification.sent`
+    and `event.ai.completed` messages directly onto RabbitMQ (no need to
+    run notification-service/ai-service/channel-service/event-service) to
+    confirm those two reused keys map correctly. Confirmed the `action`
+    query filter and `/audit-logs/me`'s cross-action scoping (returned
+    all four of the test user's own rows: one login, three rule changes).
+    Standard 400/401/403 authorization edges, port 8010 accepting no
+    direct connections, and full workspace build+lint clean.
