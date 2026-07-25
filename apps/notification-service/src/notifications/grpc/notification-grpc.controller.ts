@@ -20,6 +20,7 @@ interface NotificationMessage {
   sent_at: string;
   created_at: string;
   updated_at: string;
+  read_status: string;
 }
 
 interface ListQueryMessage {
@@ -35,6 +36,7 @@ interface ListNotificationsRequest {
   tenant_id: string;
   status: string;
   query: ListQueryMessage;
+  read_status: string;
 }
 
 interface ListNotificationsResponse {
@@ -45,6 +47,11 @@ interface ListNotificationsResponse {
 }
 
 interface GetNotificationRequest {
+  requester_id: string;
+  notification_id: string;
+}
+
+interface MarkNotificationReadRequest {
   requester_id: string;
   notification_id: string;
 }
@@ -66,6 +73,7 @@ function toNotificationMessage(notification: Notification): NotificationMessage 
     sent_at: notification.sentAt?.toISOString() ?? "",
     created_at: notification.createdAt.toISOString(),
     updated_at: notification.updatedAt.toISOString(),
+    read_status: notification.readStatus,
   };
 }
 
@@ -90,6 +98,7 @@ export class NotificationGrpcController {
       data.requester_id,
       toRawListQuery(data.query),
       data.status || undefined,
+      data.read_status || undefined,
     );
     return {
       list: result.list.map(toNotificationMessage),
@@ -102,6 +111,15 @@ export class NotificationGrpcController {
   @GrpcMethod("Notification", "GetNotification")
   async getNotification(data: GetNotificationRequest): Promise<NotificationMessage> {
     const notification = await this.notificationsService.findOne(
+      data.notification_id,
+      data.requester_id,
+    );
+    return toNotificationMessage(notification);
+  }
+
+  @GrpcMethod("Notification", "MarkNotificationRead")
+  async markNotificationRead(data: MarkNotificationReadRequest): Promise<NotificationMessage> {
+    const notification = await this.notificationsService.markRead(
       data.notification_id,
       data.requester_id,
     );

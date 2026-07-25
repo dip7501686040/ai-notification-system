@@ -25,7 +25,13 @@
     "class-transformer": "^0.5.1",
     "@nestjs/passport": "^10.0.3",
     "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0"
+    "passport-google-oauth20": "^2.0.0",
+    "@ai-notification/rabbitmq": "workspace:*",
+    "@nestjs/websockets": "^10.4.15",
+    "@nestjs/platform-socket.io": "^10.4.15",
+    "socket.io": "^4.8.3",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "redis": "^4.7.1"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",

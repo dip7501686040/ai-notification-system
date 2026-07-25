@@ -2201,3 +2201,123 @@ Features
     ai-service's queues bound to it independently. Standard 401/404
     authorization edges, and port 8004 accepts no direct connections.
     Full workspace build+lint clean throughout.
+
+14. ✅ Channel Service (real Email/Webhook connectors) + real-time
+    WebSocket dashboard push.
+    channel-service: replaces notification-service's old
+    `DispatchSimulatorService` with real external delivery.
+    Stateless -- no database, no RabbitMQ -- a pure gRPC connector layer
+    (`Dispatch(channel, target, payload_json) -> {success, error}`)
+    behind one `ChannelConnector` interface, called only by
+    notification-service; no REST surface, no api-gateway route, no auth
+    of its own. `EmailConnector` sends real Gmail SMTP via `nodemailer`
+    (App Password required once 2FA is on); `WebhookConnector` POSTs with
+    an 8s timeout, success defined as any 2xx. Both fail gracefully
+    (`{success: false, error}`) rather than throwing when unconfigured or
+    unreachable, feeding straight into notification-service's existing
+    retry/dead-letter machinery instead of a new error path.
+
+    The harder half of this pass was the user's own architecture
+    refinement: RabbitMQ transports notification events, it does not
+    replace Postgres as the source of truth, and the dashboard needs
+    real-time browser push rather than a client polling `GET
+    /notifications` on a timer. Implemented as api-gateway's first-ever
+    RabbitMQ consumer plus a `@WebSocketGateway` (Socket.IO):
+    notification-service publishes `notification.dashboard.push` for the
+    `dashboard` channel (marking `status: "sent"` immediately -- there's
+    no meaningful "retry a live push," a disconnected user just sees the
+    row later as `readStatus: "unread"` over REST); api-gateway relays it
+    to `tenant:${tenantId}` socket rooms. A new `readStatus`
+    (`unread`/`read`) field is intentionally separate from the existing
+    delivery-lifecycle `status` field, exactly as proposed. JWT is
+    validated at handshake (reusing `validateTokenViaGrpc`) and tenant
+    membership is re-checked at subscribe-time (`checkMembershipViaGrpc`)
+    rather than trusting a client-claimed `tenantId` -- the same
+    never-trust-the-client convention as every REST endpoint's tenant
+    checks. `@socket.io/redis-adapter` is wired in even at single-instance
+    scale, since it's the standard correctness fix the moment api-gateway
+    ever runs more than one replica.
+
+    Two real bugs surfaced during this, not simulated ones:
+    - A genuine race condition: a test client emitting `"subscribe"`
+      immediately on `"connect"` ran ahead of `handleConnection`'s async
+      JWT-validation gRPC call, so `handleSubscribe` saw `userId:
+      undefined` and its own guard clause disconnected the socket --
+      manifesting as an opaque "server namespace disconnect." Root-caused
+      by running the container with `DEBUG=socket.io:*,engine:*` for
+      protocol-level logs and isolating via a no-op handler that survived
+      cleanly. Fixed with an explicit `authenticated` event emitted once
+      `handleConnection` actually finishes, which clients must wait for
+      before subscribing.
+    - NestJS's global `ValidationPipe({whitelist: true})` also governs
+      WebSocket `@MessageBody()`, not just REST DTOs -- a plain TS
+      interface for the subscribe payload had no `class-validator`
+      metadata to whitelist against. Fixed by giving it a real
+      `SubscribeDto` class, the same convention every REST DTO in this
+      codebase already follows.
+
+    Verified live: a real Gmail email actually received end-to-end; a
+    real webhook success against a live listener and a real
+    failure/retry/dead-letter cycle against an unreachable host
+    (replacing the old fake `target.includes("fail")` simulation with
+    genuine unreachability); a WebSocket client connect -> authenticated
+    -> subscribed -> live `notification` event sequence with zero
+    disconnects after the fixes above; an offline user's dashboard
+    notification still landing in Postgres as `readStatus: "unread"`,
+    fetchable and mark-as-readable later over REST. Standard auth edges
+    (missing/garbage token both rejected at handshake) and port isolation
+    (no direct host access to channel-service) re-checked.
+
+15. ✅ Template Service ({{variable}} rendering for FR-6, wired into
+    every channel).
+    The email delivered in #14 rendered as raw `{"template": null}` --
+    `RuleAction.template` had existed since rule-engine-service was built
+    but nothing ever rendered it into content. template-service closes
+    that gap: a `Template` model keyed by `(tenantId, name, channel)`
+    since one logical template needs a different shape per channel (a
+    full subject+body email version vs. a body-only dashboard version of
+    the same alert), standard Prisma CRUD via api-gateway
+    (`POST/GET/PATCH/DELETE /templates`), plus an internal
+    (no-`requester_id`) `RenderTemplate` gRPC method that notification-
+    service calls, not the gateway. Rendering itself
+    (`src/templates/render.ts`) is deliberately minimal -- straight
+    `{{variable}}` substitution, no control flow or partials, per FR-6's
+    stated scope.
+
+    The actual missing link wasn't template-service itself, it was that
+    `event.rule.matched` (rule-consumer.service.ts) never carried the
+    original event's `type`/`source`/`payload` -- only rule metadata --
+    so there was nothing to substitute variables *from*. Added those
+    three fields to that publish call and threaded them through
+    notification-consumer.service.ts into `createFromMatch`, which now
+    builds the same flattened `{type, source, tenantId, ...payload}`
+    context rule-engine already uses for condition evaluation (plus an
+    `eventType` alias for `type`, matching FR-6's documented variable
+    name) and renders it per action when `action.template` is set.
+
+    Every channel benefits from one render step rather than three: a
+    found template stores `payload: {subject, body}`; no template (or a
+    template name that doesn't exist, e.g. a stale reference) falls back
+    to storing the flattened event context itself rather than a
+    placeholder -- so even an untemplated notification shows real data,
+    never `{template: null}`. channel-service's `EmailConnector` was
+    updated to use `payload.subject`/`payload.body` directly when
+    present, falling back to its old pretty-printed-JSON behavior
+    otherwise; webhook and dashboard already forwarded `payload` verbatim,
+    so rendered content flows through them with no channel-specific
+    change at all -- confirming the earlier design bet that dashboard
+    "needs templates too" for free once rendering happens upstream in
+    notification-service.
+
+    Verified live end-to-end: a real Gmail email with a rendered
+    subject/body containing actual event data (not `{{tokens}}`, not raw
+    JSON); a rule action with no template producing a notification
+    `payload` of flattened event context instead of the old placeholder;
+    a rule action referencing a nonexistent template name degrading
+    gracefully to the same fallback rather than crashing or dead-
+    lettering the dispatch; a dashboard-channel template rendering and
+    arriving over the live WebSocket push from #14 with real substituted
+    variables, confirmed both in the socket payload and via
+    `GET`/`PATCH .../read` over REST afterward. Standard 400/401/403/404
+    authorization edges on `/templates` re-checked, and port 8008 accepts
+    no direct connections. Full workspace build+lint clean.

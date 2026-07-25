@@ -1,6 +1,7 @@
 import { Module, type Type } from "@nestjs/common";
 import { PassportModule } from "@nestjs/passport";
 import { GrpcHealthController } from "@ai-notification/grpc";
+import { RabbitMQModule } from "@ai-notification/rabbitmq";
 import { HealthController } from "./health/health.controller";
 import { ServiceHealthController } from "./health/service-health.controller";
 import { ProtectedController } from "./auth/protected.controller";
@@ -10,9 +11,12 @@ import { GoogleStrategy } from "./auth/strategies/google.strategy";
 import { TenantsController } from "./tenants/tenants.controller";
 import { EventsController } from "./events/events.controller";
 import { RulesController } from "./rules/rules.controller";
+import { TemplatesController } from "./templates/templates.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
+import { NotificationsGateway } from "./notifications/notifications.gateway";
+import { NotificationPushConsumerService } from "./notifications/notification-push-consumer.service";
 import { AiController } from "./ai/ai.controller";
-import { isGoogleOAuthConfigured } from "./env";
+import { env, isGoogleOAuthConfigured } from "./env";
 
 const controllers: Type<unknown>[] = [
   HealthController,
@@ -23,10 +27,11 @@ const controllers: Type<unknown>[] = [
   TenantsController,
   EventsController,
   RulesController,
+  TemplatesController,
   NotificationsController,
   AiController,
 ];
-const providers: Type<unknown>[] = [];
+const providers: Type<unknown>[] = [NotificationsGateway, NotificationPushConsumerService];
 
 if (isGoogleOAuthConfigured) {
   controllers.push(GoogleAuthController);
@@ -34,7 +39,7 @@ if (isGoogleOAuthConfigured) {
 }
 
 @Module({
-  imports: [PassportModule],
+  imports: [PassportModule, RabbitMQModule.forRoot({ url: env.RABBITMQ_URL })],
   controllers,
   providers,
 })

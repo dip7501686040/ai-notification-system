@@ -18,6 +18,7 @@ message NotificationMessage {
   string sent_at = 13;
   string created_at = 14;
   string updated_at = 15;
+  string read_status = 16;
 }
 
 // Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
@@ -35,6 +36,7 @@ message ListNotificationsRequest {
   string tenant_id = 2;
   string status = 3;
   ListQuery query = 4;
+  string read_status = 5;
 }
 
 message ListNotificationsResponse {
@@ -49,9 +51,17 @@ message GetNotificationRequest {
   string notification_id = 2;
 }
 
-// Read-only: lifecycle is managed entirely by notification-service's own
-// consumer/retry-scheduler, not by external callers.
+message MarkNotificationReadRequest {
+  string requester_id = 1;
+  string notification_id = 2;
+}
+
+// Lifecycle (status) is managed entirely by notification-service's own
+// consumer/retry-scheduler, not by external callers. MarkNotificationRead
+// is the one exception -- read/unread state is a viewer-side concern, not
+// a delivery-lifecycle one.
 service Notification {
   rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
   rpc GetNotification(GetNotificationRequest) returns (NotificationMessage);
+  rpc MarkNotificationRead(MarkNotificationReadRequest) returns (NotificationMessage);
 }

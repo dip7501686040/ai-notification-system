@@ -8,6 +8,8 @@ export * from "./event-client";
 export * from "./rule-client";
 export * from "./notification-client";
 export * from "./ai-client";
+export * from "./channel-client";
+export * from "./template-client";
 export * from "./call-unary";
 export * from "./grpc-exception.filter";
 export * from "./grpc-error";

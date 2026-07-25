@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package template.v1;
+
+message TemplateMessage {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string channel = 4;
+  string subject = 5;
+  string body = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+// Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string
+// means "not provided" for every field here.
+message ListQuery {
+  string page = 1;
+  string limit = 2;
+  string search = 3;
+  string sort_fields = 4;
+  string sort_type = 5;
+}
+
+message SuccessResponse {
+  bool success = 1;
+}
+
+message CreateTemplateRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string channel = 4;
+  string subject = 5;
+  string body = 6;
+}
+
+message ListTemplatesRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  ListQuery query = 3;
+}
+
+message ListTemplatesResponse {
+  repeated TemplateMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message GetTemplateRequest {
+  string requester_id = 1;
+  string template_id = 2;
+}
+
+// Empty string for name/channel/subject/body means "leave unchanged".
+message UpdateTemplateRequest {
+  string requester_id = 1;
+  string template_id = 2;
+  string name = 3;
+  string channel = 4;
+  string subject = 5;
+  string body = 6;
+}
+
+message DeleteTemplateRequest {
+  string requester_id = 1;
+  string template_id = 2;
+}
+
+// Internal-only (no requester_id) -- called by notification-service, not
+// the gateway. found=false means no matching template was ever created.
+message RenderTemplateRequest {
+  string tenant_id = 1;
+  string name = 2;
+  string channel = 3;
+  string variables_json = 4;
+}
+
+message RenderTemplateResponse {
+  bool found = 1;
+  string subject = 2;
+  string body = 3;
+}
+
+service Template {
+  rpc CreateTemplate(CreateTemplateRequest) returns (TemplateMessage);
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
+  rpc GetTemplate(GetTemplateRequest) returns (TemplateMessage);
+  rpc UpdateTemplate(UpdateTemplateRequest) returns (TemplateMessage);
+  rpc DeleteTemplate(DeleteTemplateRequest) returns (SuccessResponse);
+  rpc RenderTemplate(RenderTemplateRequest) returns (RenderTemplateResponse);
+}

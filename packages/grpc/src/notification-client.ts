@@ -18,6 +18,7 @@ export interface NotificationResult {
   sentAt: string;
   createdAt: string;
   updatedAt: string;
+  readStatus: string;
 }
 
 export interface PaginatedNotificationsResult {
@@ -53,6 +54,7 @@ interface NotificationWireMessage {
   sent_at: string;
   created_at: string;
   updated_at: string;
+  read_status: string;
 }
 
 interface ListQueryWireMessage {
@@ -94,6 +96,7 @@ function toNotificationResult(wire: NotificationWireMessage): NotificationResult
     sentAt: wire.sent_at,
     createdAt: wire.created_at,
     updatedAt: wire.updated_at,
+    readStatus: wire.read_status,
   };
 }
 
@@ -113,17 +116,25 @@ export async function listNotificationsViaGrpc(
   tenantId: string,
   query: NotificationListQueryParams,
   status?: string,
+  readStatus?: string,
 ): Promise<PaginatedNotificationsResult> {
   const client = createClient(address);
   try {
     const response = await callUnary<
-      { requester_id: string; tenant_id: string; status: string; query: ListQueryWireMessage },
+      {
+        requester_id: string;
+        tenant_id: string;
+        status: string;
+        query: ListQueryWireMessage;
+        read_status: string;
+      },
       ListNotificationsWireResponse
     >(client, "ListNotifications", {
       requester_id: requesterId,
       tenant_id: tenantId,
       status: status ?? "",
       query: toQueryWire(query),
+      read_status: readStatus ?? "",
     });
     return {
       list: response.list.map(toNotificationResult),
@@ -147,6 +158,26 @@ export async function getNotificationViaGrpc(
       { requester_id: string; notification_id: string },
       NotificationWireMessage
     >(client, "GetNotification", { requester_id: requesterId, notification_id: notificationId });
+    return toNotificationResult(response);
+  } finally {
+    client.close();
+  }
+}
+
+export async function markNotificationReadViaGrpc(
+  address: string,
+  requesterId: string,
+  notificationId: string,
+): Promise<NotificationResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; notification_id: string },
+      NotificationWireMessage
+    >(client, "MarkNotificationRead", {
+      requester_id: requesterId,
+      notification_id: notificationId,
+    });
     return toNotificationResult(response);
   } finally {
     client.close();

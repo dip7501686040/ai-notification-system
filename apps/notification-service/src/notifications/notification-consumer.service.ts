@@ -12,6 +12,9 @@ interface RuleMatchedMessage {
   ruleId: string;
   ruleName: string;
   actions: unknown;
+  type: string;
+  source?: string;
+  payload: Record<string, unknown>;
   matchedAt: string;
 }
 
@@ -36,6 +39,12 @@ export class NotificationConsumerService implements OnModuleInit {
       message.eventId,
       message.ruleId,
       message.actions,
+      {
+        type: message.type,
+        source: message.source,
+        tenantId: message.tenantId,
+        ...message.payload,
+      },
     );
   }
 }

@@ -77,6 +77,9 @@ export class RuleConsumerService implements OnModuleInit {
         ruleId: rule.id,
         ruleName: rule.name,
         actions: rule.actions,
+        type: message.type,
+        source: message.source,
+        payload: message.payload,
         matchedAt: new Date().toISOString(),
       });
 

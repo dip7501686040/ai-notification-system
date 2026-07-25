@@ -6,6 +6,7 @@ import type { MicroserviceOptions } from "@nestjs/microservices";
 import { grpcHealthMicroserviceOptions } from "@ai-notification/grpc";
 import { AppModule } from "./app.module";
 import { createLogger } from "@ai-notification/logger";
+import { RedisIoAdapter } from "./notifications/redis-io.adapter";
 import { env } from "./env";
 
 async function bootstrap() {
@@ -13,6 +14,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+  const redisIoAdapter = new RedisIoAdapter(app, env.REDIS_URL);
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
 
   app.connectMicroservice<MicroserviceOptions>(grpcHealthMicroserviceOptions(env.GRPC_PORT));
   await app.startAllMicroservices();

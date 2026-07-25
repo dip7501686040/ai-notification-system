@@ -20,13 +20,15 @@
     "zod": "^3.24.0",
     "@ai-notification/telemetry": "workspace:*",
     "@ai-notification/grpc": "workspace:*",
-    "@nestjs/microservices": "^10.4.15"
+    "@nestjs/microservices": "^10.4.15",
+    "nodemailer": "^6.9.16"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",
     "@nestjs/cli": "^10.4.9",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^6.4.17",
     "typescript": "^5.9.3"
   }
 }

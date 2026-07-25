@@ -1,14 +1,18 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
-import { checkMembershipViaGrpc } from "@ai-notification/grpc";
+import {
+  checkMembershipViaGrpc,
+  dispatchViaGrpc,
+  renderTemplateViaGrpc,
+} from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import type { Notification, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
-import { DispatchSimulatorService } from "./dispatch-simulator.service";
 import { env, retryBackoffMs } from "../env";
 
 const NOTIFICATION_SEARCHABLE_FIELDS = ["channel", "target", "status"];
 const EXCHANGE = "platform";
+const DASHBOARD_CHANNEL = "dashboard";
 
 interface RuleAction {
   channel: string;
@@ -39,7 +43,6 @@ export class NotificationsService extends BaseCrudService<
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbitmq: RabbitMQService,
-    private readonly dispatchSimulator: DispatchSimulatorService,
   ) {
     super(prisma.notification);
   }
@@ -48,12 +51,16 @@ export class NotificationsService extends BaseCrudService<
   // each entry is expected to be { channel: string, target: string,
   // template?: string }. Malformed entries are skipped with a warning
   // rather than failing the whole match (one bad action shouldn't drop
-  // the others).
+  // the others). eventContext is the flattened `{type, source, tenantId,
+  // ...payload}` object rule-engine already builds for condition
+  // evaluation -- reused here as the variable source for template
+  // rendering (plus an `eventType` alias for `type`, per FR-6).
   async createFromMatch(
     tenantId: string,
     eventId: string,
     ruleId: string,
     actions: unknown,
+    eventContext: Record<string, unknown>,
   ): Promise<void> {
     if (!Array.isArray(actions)) {
       this.logger.warn(
@@ -61,6 +68,8 @@ export class NotificationsService extends BaseCrudService<
       );
       return;
     }
+
+    const variables = { ...eventContext, eventType: eventContext.type };
 
     for (const action of actions) {
       if (!isValidAction(action)) {
@@ -70,13 +79,27 @@ export class NotificationsService extends BaseCrudService<
         continue;
       }
 
+      let payload: Record<string, unknown> = variables;
+      if (action.template) {
+        const rendered = await renderTemplateViaGrpc(
+          env.TEMPLATE_GRPC_ADDRESS,
+          tenantId,
+          action.template,
+          action.channel,
+          variables,
+        );
+        if (rendered.found) {
+          payload = { subject: rendered.subject, body: rendered.body };
+        }
+      }
+
       const notification = await super.create({
         tenantId,
         eventId,
         ruleId,
         channel: action.channel,
         target: action.target,
-        payload: { template: action.template ?? null } as Prisma.InputJsonValue,
+        payload: payload as Prisma.InputJsonValue,
         status: "pending",
       });
 
@@ -94,7 +117,25 @@ export class NotificationsService extends BaseCrudService<
   }
 
   async attemptDispatch(notification: Notification): Promise<Notification> {
-    const result = await this.dispatchSimulator.dispatch(
+    // The dashboard channel is best-effort/real-time, not a guaranteed
+    // external send -- there's no meaningful "retry a live push" the way
+    // SMTP/webhook retries make sense. api-gateway relays this over
+    // RabbitMQ to whichever browser is actually connected; if nobody's
+    // listening, the row still exists here as `readStatus: "unread"`,
+    // fetchable later over REST.
+    if (notification.channel === DASHBOARD_CHANNEL) {
+      await this.rabbitmq.publish(EXCHANGE, "notification.dashboard.push", {
+        notificationId: notification.id,
+        tenantId: notification.tenantId,
+        userId: notification.target,
+        payload: notification.payload,
+        createdAt: notification.createdAt,
+      });
+      return super.update({ id: notification.id }, { status: "sent", sentAt: new Date() });
+    }
+
+    const result = await dispatchViaGrpc(
+      env.CHANNEL_GRPC_ADDRESS,
       notification.channel,
       notification.target,
       notification.payload,
@@ -163,9 +204,14 @@ export class NotificationsService extends BaseCrudService<
     requesterId: string,
     query: RawListQuery,
     status?: string,
+    readStatus?: string,
   ): Promise<Paginated<Notification>> {
     await this.assertMembership(tenantId, requesterId);
-    const baseWhere: Prisma.NotificationWhereInput = status ? { tenantId, status } : { tenantId };
+    const baseWhere: Prisma.NotificationWhereInput = {
+      tenantId,
+      ...(status ? { status } : {}),
+      ...(readStatus ? { readStatus } : {}),
+    };
     return this.list(query, { searchableFields: NOTIFICATION_SEARCHABLE_FIELDS }, baseWhere);
   }
 
@@ -173,6 +219,12 @@ export class NotificationsService extends BaseCrudService<
     const notification = await this.getNotificationOrThrow(notificationId);
     await this.assertMembership(notification.tenantId, requesterId, true);
     return notification;
+  }
+
+  async markRead(notificationId: string, requesterId: string): Promise<Notification> {
+    const notification = await this.getNotificationOrThrow(notificationId);
+    await this.assertMembership(notification.tenantId, requesterId, true);
+    return super.update({ id: notificationId }, { readStatus: "read" });
   }
 
   private async getNotificationOrThrow(notificationId: string): Promise<Notification> {
