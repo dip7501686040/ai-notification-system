@@ -10,12 +10,14 @@ message ValidateTokenResponse {
   bool valid = 1;
   string user_id = 2;
   string email = 3;
+  bool is_super_admin = 5;
   string error = 4;
 }
 
 message UserMessage {
   string id = 1;
   string email = 2;
+  bool is_super_admin = 5;
   string name = 3;
   string provider = 4;
 }

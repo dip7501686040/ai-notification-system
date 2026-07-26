@@ -9,6 +9,7 @@ const schema = z.object({
   RABBITMQ_URL: z.string().default("amqp://guest:guest@rabbitmq:5672"),
   IDENTITY_AUTH_GRPC_ADDRESS: z.string().default("identity-service:50152"),
   TENANT_GRPC_ADDRESS: z.string().default("tenant-service:50153"),
+  RULE_ENGINE_GRPC_ADDRESS: z.string().default("rule-engine-service:50156"),
 });
 
 export const env = loadEnv(schema);

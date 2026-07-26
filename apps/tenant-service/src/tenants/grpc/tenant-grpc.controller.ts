@@ -4,6 +4,7 @@ import type { RawListQuery } from "@ai-notification/common";
 import type { ApiKey, Tenant, TenantMember } from "../../../generated/prisma-client";
 import { TenantsService } from "../tenants.service";
 import { ApiKeysService } from "../api-keys.service";
+import { BillingService } from "../billing.service";
 import type { TenantRole } from "../dto/add-member.dto";
 
 interface GetTenantRequest {
@@ -195,6 +196,51 @@ interface ValidateApiKeyResponse {
   rate_limit: number;
 }
 
+interface ListAllTenantsRequest {
+  requester_id: string;
+  query: ListQueryMessage;
+}
+
+interface ListAllTenantsResponse {
+  list: TenantMessage[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface SetTenantStatusRequest {
+  requester_id: string;
+  tenant_id: string;
+  status: string;
+}
+
+interface CreateCheckoutSessionRequest {
+  requester_id: string;
+  tenant_id: string;
+  plan: string;
+}
+
+interface BillingUrlResponse {
+  url: string;
+}
+
+interface CreatePortalSessionRequest {
+  requester_id: string;
+  tenant_id: string;
+}
+
+interface CancelSubscriptionRequest {
+  requester_id: string;
+  tenant_id: string;
+}
+
+interface ApplyStripeWebhookEventRequest {
+  kind: string;
+  tenant_id: string;
+  plan: string;
+  subscription_id: string;
+}
+
 function toTenantMessage(tenant: Tenant): TenantMessage {
   return {
     id: tenant.id,
@@ -247,6 +293,7 @@ export class TenantGrpcController {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly apiKeysService: ApiKeysService,
+    private readonly billingService: BillingService,
   ) {}
 
   @GrpcMethod("Tenant", "GetTenant")
@@ -401,5 +448,56 @@ export class TenantGrpcController {
       api_key_id: result.apiKeyId ?? "",
       rate_limit: result.rateLimit ?? 0,
     };
+  }
+
+  @GrpcMethod("Tenant", "ListAllTenants")
+  async listAllTenants(data: ListAllTenantsRequest): Promise<ListAllTenantsResponse> {
+    const result = await this.tenantsService.findAllAsAdmin(
+      data.requester_id,
+      toRawListQuery(data.query),
+    );
+    return {
+      list: result.list.map(toTenantMessage),
+      total: result.total,
+      page: result.page,
+      page_size: result.pageSize,
+    };
+  }
+
+  @GrpcMethod("Tenant", "SetTenantStatus")
+  async setTenantStatus(data: SetTenantStatusRequest): Promise<TenantMessage> {
+    const tenant = await this.tenantsService.setStatusAsAdmin(
+      data.requester_id,
+      data.tenant_id,
+      data.status,
+    );
+    return toTenantMessage(tenant);
+  }
+
+  @GrpcMethod("Tenant", "CreateCheckoutSession")
+  async createCheckoutSession(data: CreateCheckoutSessionRequest): Promise<BillingUrlResponse> {
+    return this.billingService.createCheckoutSession(data.tenant_id, data.requester_id, data.plan);
+  }
+
+  @GrpcMethod("Tenant", "CreatePortalSession")
+  async createPortalSession(data: CreatePortalSessionRequest): Promise<BillingUrlResponse> {
+    return this.billingService.createPortalSession(data.tenant_id, data.requester_id);
+  }
+
+  @GrpcMethod("Tenant", "CancelSubscription")
+  async cancelSubscription(data: CancelSubscriptionRequest): Promise<SuccessResponse> {
+    await this.billingService.cancelSubscription(data.tenant_id, data.requester_id);
+    return { success: true };
+  }
+
+  @GrpcMethod("Tenant", "ApplyStripeWebhookEvent")
+  async applyStripeWebhookEvent(data: ApplyStripeWebhookEventRequest): Promise<SuccessResponse> {
+    await this.billingService.applyWebhookEvent(
+      data.kind as "checkout.completed" | "subscription.canceled",
+      data.tenant_id,
+      data.plan,
+      data.subscription_id,
+    );
+    return { success: true };
   }
 }

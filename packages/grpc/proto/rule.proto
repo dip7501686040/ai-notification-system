@@ -76,10 +76,22 @@ message DeleteRuleRequest {
   string rule_id = 2;
 }
 
+// No requester_id -- called service-to-service by event-service on
+// every ingest, not on a user's behalf.
+message HasMatchingRuleRequest {
+  string tenant_id = 1;
+  string event_type = 2;
+}
+
+message HasMatchingRuleResponse {
+  bool has_match = 1;
+}
+
 service Rule {
   rpc CreateRule(CreateRuleRequest) returns (RuleMessage);
   rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
   rpc GetRule(GetRuleRequest) returns (RuleMessage);
   rpc UpdateRule(UpdateRuleRequest) returns (RuleMessage);
   rpc DeleteRule(DeleteRuleRequest) returns (SuccessResponse);
+  rpc HasMatchingRule(HasMatchingRuleRequest) returns (HasMatchingRuleResponse);
 }

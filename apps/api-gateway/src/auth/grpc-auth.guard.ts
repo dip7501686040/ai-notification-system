@@ -6,6 +6,7 @@ import { env } from "../env";
 export interface AuthenticatedUser {
   id: string;
   email: string;
+  isSuperAdmin: boolean;
 }
 
 @Injectable()
@@ -29,6 +30,7 @@ export class GrpcAuthGuard implements CanActivate {
     (request as Request & { user?: AuthenticatedUser }).user = {
       id: result.userId,
       email: result.email,
+      isSuperAdmin: result.isSuperAdmin,
     };
     return true;
   }

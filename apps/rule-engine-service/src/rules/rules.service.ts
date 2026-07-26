@@ -117,6 +117,22 @@ export class RulesService extends BaseCrudService<
     });
   }
 
+  // Called synchronously by event-service on every POST /events, so it
+  // deliberately only checks the same eventType-or-wildcard match
+  // findActiveForEvaluation uses -- not each matched rule's `conditions`,
+  // which depends on the event payload and would mean duplicating (or
+  // calling back into) the in-memory evaluator on every ingest.
+  async hasEnabledRuleForType(tenantId: string, eventType: string): Promise<boolean> {
+    const count = await this.prisma.rule.count({
+      where: {
+        tenantId,
+        enabled: true,
+        OR: [{ eventType }, { eventType: "*" }],
+      },
+    });
+    return count > 0;
+  }
+
   // FR-9 audit logging (Audit Service): fire-and-forget, mirrors the
   // shape AuditConsumerService expects for the generic `audit.created`
   // event -- rule.created/updated write the same metadata shape.

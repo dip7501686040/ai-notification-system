@@ -31,7 +31,8 @@
     "@nestjs/platform-socket.io": "^10.4.15",
     "socket.io": "^4.8.3",
     "@socket.io/redis-adapter": "^8.3.0",
-    "redis": "^4.7.1"
+    "redis": "^4.7.1",
+    "stripe": "^17.4.0"
   },
   "devDependencies": {
     "@ai-notification/typescript-config": "workspace:*",

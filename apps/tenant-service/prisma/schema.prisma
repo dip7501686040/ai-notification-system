@@ -10,14 +10,16 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  plan      String   @default("free")
-  status    String   @default("active")
-  settings  Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  name                 String
+  slug                 String   @unique
+  plan                 String   @default("free")
+  status               String   @default("active")
+  settings             Json?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   members TenantMember[]
   apiKeys ApiKey[]

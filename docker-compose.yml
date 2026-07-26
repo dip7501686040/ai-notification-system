@@ -172,6 +172,11 @@ services:
       AUDIT_GRPC_ADDRESS: audit-service:50161
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDIS_URL: redis://redis:6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:8000/auth/google/callback}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -181,6 +186,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Forwards Stripe test-mode webhook events to api-gateway for local
+  # dev -- Stripe's servers can't reach localhost directly, so this
+  # stands in for a public webhook endpoint. Opt-in via the "stripe"
+  # profile (add COMPOSE_PROFILES=stripe to .env) so the stack still
+  # comes up cleanly with no Stripe credentials at all.
+  #
+  # One-time setup: after this container is up, `docker compose logs
+  # stripe-cli` prints "Your webhook signing secret is whsec_...".
+  # Stripe's CLI keeps this secret stable across restarts for a given
+  # API key, so paste it into STRIPE_WEBHOOK_SECRET in .env once and
+  # it never needs to change.
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    restart: unless-stopped
+    command: listen --api-key ${STRIPE_SECRET_KEY:-} --forward-to api-gateway:8000/webhooks/stripe
+    profiles: ["stripe"]
+    depends_on:
+      api-gateway:
+        condition: service_started
+    networks: [ai-notification]
 
   identity-service:
     <<: *nest-defaults
@@ -219,6 +245,10 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tenant_db
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
     depends_on:
       otel-collector:
         condition: service_started
@@ -242,6 +272,7 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
       TENANT_GRPC_ADDRESS: tenant-service:50153
+      RULE_ENGINE_GRPC_ADDRESS: rule-engine-service:50156
     depends_on:
       otel-collector:
         condition: service_started
@@ -442,6 +473,26 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+  # Next.js SaaS dashboard -- the browser talks to api-gateway directly
+  # (NEXT_PUBLIC_* vars below), so this is the one other service besides
+  # api-gateway that legitimately needs a host port.
+  web:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/web-service.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api-gateway:
+        condition: service_started
+    networks: [ai-notification]
 
   # ---------------------------------------------------------------------
   # App services (Python)

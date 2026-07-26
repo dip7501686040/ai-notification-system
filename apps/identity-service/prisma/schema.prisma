@@ -16,6 +16,7 @@ model User {
   name         String?
   provider     String   @default("local")
   providerId   String?
+  isSuperAdmin Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -238,3 +238,20 @@ export async function deleteRuleViaGrpc(
     client.close();
   }
 }
+
+export async function hasMatchingRuleViaGrpc(
+  address: string,
+  tenantId: string,
+  eventType: string,
+): Promise<boolean> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { tenant_id: string; event_type: string },
+      { has_match: boolean }
+    >(client, "HasMatchingRule", { tenant_id: tenantId, event_type: eventType });
+    return response.has_match;
+  } finally {
+    client.close();
+  }
+}

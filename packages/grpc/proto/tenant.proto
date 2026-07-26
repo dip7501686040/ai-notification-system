@@ -200,6 +200,59 @@ message ValidateApiKeyResponse {
   int32 rate_limit = 4;
 }
 
+// Platform-wide (Super Admin) -- not scoped to the caller's own
+// memberships. requester_id is independently re-verified as a super
+// admin by tenant-service itself, not just trusted from the gateway.
+message ListAllTenantsRequest {
+  string requester_id = 1;
+  ListQuery query = 2;
+}
+
+message ListAllTenantsResponse {
+  repeated TenantMessage list = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message SetTenantStatusRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string status = 3;
+}
+
+// Billing (real Stripe integration, test mode): tenant-service owns
+// every actual Stripe API call. api-gateway only verifies the webhook
+// signature at the public HTTP edge, then forwards the normalized event
+// here via ApplyStripeWebhookEvent -- no requester_id, api-gateway has
+// already established this is a genuine, signed Stripe event.
+message CreateCheckoutSessionRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+  string plan = 3;
+}
+
+message BillingUrlResponse {
+  string url = 1;
+}
+
+message CreatePortalSessionRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
+message CancelSubscriptionRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
+message ApplyStripeWebhookEventRequest {
+  string kind = 1;
+  string tenant_id = 2;
+  string plan = 3;
+  string subscription_id = 4;
+}
+
 service Tenant {
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
   rpc GetTenantForUser(GetTenantForUserRequest) returns (TenantMessage);
@@ -217,4 +270,10 @@ service Tenant {
   rpc RotateApiKey(RotateApiKeyRequest) returns (RotateApiKeyResponse);
   rpc RevokeApiKey(RevokeApiKeyRequest) returns (SuccessResponse);
   rpc ValidateApiKey(ValidateApiKeyRequest) returns (ValidateApiKeyResponse);
+  rpc ListAllTenants(ListAllTenantsRequest) returns (ListAllTenantsResponse);
+  rpc SetTenantStatus(SetTenantStatusRequest) returns (TenantMessage);
+  rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (BillingUrlResponse);
+  rpc CreatePortalSession(CreatePortalSessionRequest) returns (BillingUrlResponse);
+  rpc CancelSubscription(CancelSubscriptionRequest) returns (SuccessResponse);
+  rpc ApplyStripeWebhookEvent(ApplyStripeWebhookEventRequest) returns (SuccessResponse);
 }

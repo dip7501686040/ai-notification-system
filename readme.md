@@ -2551,3 +2551,142 @@ Features
     appear correctly in `/audit-logs`; confirmed the existing
     JWT-authenticated `POST`/`GET /events` paths are completely
     unaffected. Full workspace build+lint clean.
+
+20. ✅ Frontend: Next.js SaaS dashboard (`apps/web`) + 3 backend
+    prerequisites it needed (Super Admin, real Stripe billing, Google
+    OAuth callback + CORS).
+    With every backend FR done except prediction-service (deliberately
+    deferred), this pass built the actual product surface: a modern SaaS
+    dashboard consuming every public api-gateway resource, plus three
+    backend pieces that didn't exist yet but the frontend requires.
+    **Super Admin**: `User.isSuperAdmin` (identity-service), threaded
+    through `ValidateToken`'s existing gRPC round trip so `GrpcAuthGuard`
+    gets it for free; tenant-service's new `ListAllTenants`/
+    `SetTenantStatus` bypass all per-tenant membership scoping on
+    purpose (a super admin isn't necessarily a member of any given
+    tenant), so tenant-service independently re-verifies super-admin
+    status via identity-service's own `GetUser` rather than trusting the
+    gateway's `SuperAdminGuard` alone -- the same defense-in-depth
+    philosophy as every other cross-service check in this codebase.
+    **Real Stripe billing** (test mode): tenant-service owns every actual
+    Stripe API call (`BillingService`, using the `stripe` Node SDK);
+    api-gateway's only role is verifying the `Stripe-Signature` webhook
+    header against the raw request body (`rawBody: true`) since that's
+    the one public HTTP entry point Stripe itself calls, then forwarding
+    a normalized event over gRPC. Downgrading goes through a real
+    `stripe.subscriptions.cancel()`, not a raw `plan: "free"` field flip,
+    so a cancellation can't leave a live subscription silently still
+    charging. **OAuth + CORS**: the Google callback now
+    `res.redirect()`s to `${FRONTEND_URL}/auth/callback?token=...`
+    instead of dumping raw JSON at its own URL, and api-gateway gained
+    `app.enableCors({origin: FRONTEND_URL})` (Bearer tokens, not cookies,
+    so `credentials` stays false).
+
+    Frontend stack: Next.js 15 App Router, Tailwind v4, hand-rolled
+    shadcn-style primitives on Radix (no shadcn CLI), TanStack Query for
+    all server state, plain React Context (not Redux/Zustand) for the
+    two pieces of client state that actually need it (current user,
+    active tenant), `socket.io-client` for the live notification feed,
+    `react-hook-form` + `zod`, `recharts`. JWT is stored in
+    `localStorage` rather than an httpOnly cookie -- a deliberate choice,
+    not an oversight: the existing WebSocket auth contract needs the raw
+    JWT accessible to client-side JS (`socket.handshake.auth.token`), so
+    httpOnly isn't actually usable here regardless. Covers every
+    resource area: auth (register/login/forgot-reset/Google), tenant
+    picker + switcher, dashboard shell, Rules, Templates, Events (with a
+    send-test-event form demoing the full ingest -> rule -> notification
+    loop from the UI), Notifications (the explicit live-WebSocket demo
+    page -- REST list plus a real socket connection, toasting and
+    refetching on every live push), Analytics (recharts, single-hue
+    charts per the dataviz skill's guidance since each chart here is
+    single-series), Audit Logs (friendly "ask an admin" state for
+    non-owner/admin roles rather than surfacing the 403), API Keys
+    (raw-key-shown-once reveal dialog with a copy button and an explicit
+    "you won't see this again" warning), AI (analyses list + a
+    provider/model config form), Settings (tenant details + member
+    list/invite/role-change/remove -- invite is by raw user ID, since no
+    lookup-by-email endpoint exists anywhere in this codebase and adding
+    one was out of scope here), Billing (Stripe Checkout/portal
+    redirects, cancel), and a visually distinct Super Admin panel (its
+    own route group, its own accent color, only linked when
+    `user.isSuperAdmin`) for the all-tenants table and suspend/reactivate.
+
+    Two real bugs surfaced, not simulated ones. First: host-side
+    `prisma migrate dev` commands intermittently landed on a stray
+    Homebrew-installed local Postgres@14 also listening on port 5432,
+    rather than Docker's Postgres -- `prisma migrate dev` reported
+    success while the actual Docker database was still missing the new
+    columns. Fixed (and reusable going forward) by rebuilding/restarting
+    the affected containers so their own `prisma migrate deploy` step
+    (correct internal Docker hostname) applies the already-generated
+    migration files for real -- confirmed via `docker exec ... psql`
+    showing the columns present afterward. Second, in the new
+    `docker/web-service.Dockerfile` (Next.js `output: "standalone"`):
+    Docker auto-sets the `HOSTNAME` env var to the container ID, and
+    Next's standalone `server.js` binds to `$HOSTNAME` if set -- so the
+    container reported healthy at the process level but refused
+    connections on `localhost` (both the Docker healthcheck and, more
+    importantly, anything hitting its own loopback). Fixed by pinning
+    `ENV HOSTNAME=0.0.0.0` in the image so it binds all interfaces.
+
+    Also added, as local-dev conveniences rather than product features:
+    a `stripe-cli` service (official `stripe/stripe-cli` Docker image,
+    non-interactive `--api-key` auth since the browser-based `stripe
+    login` isn't supported in ephemeral containers) forwarding real
+    test-mode webhook events to api-gateway, gated behind a `stripe`
+    Compose profile so the stack still comes up cleanly with zero Stripe
+    credentials configured -- confirmed via Stripe's own docs that the
+    webhook signing secret it prints stays stable across restarts for a
+    given API key, so it's a one-time `.env` paste rather than a
+    copy-a-new-secret-every-time chore.
+
+    Verified live end-to-end through the real containerized stack
+    (including the new `web` container itself, not just api-gateway
+    directly): register -> `/auth/me` -> create tenant through
+    `localhost:3000`'s actual origin with a real CORS preflight
+    succeeding; `GET /auth/google` redirecting to Google with the exact
+    registered `client_id`/`redirect_uri`; billing routes correctly
+    flipping from "not configured" (400) to reaching the auth guard once
+    Stripe env vars were live. Every page was built and immediately
+    verified with `pnpm --filter @ai-notification/web build` + `lint`
+    before moving to the next; full workspace build+lint (37 packages,
+    up from 35) clean at the end.
+
+21. ✅ Event ingestion guard: reject `POST /events` synchronously when no
+    enabled rule matches the event's type.
+    Triggered by a real support case, traced live rather than guessed
+    at: a UI-sent `order.failed` test event produced no notification.
+    `event_db` showed it received and published fine; rule-engine-
+    service's own logs showed it was consumed correctly (it only logs on
+    an actual rule match, silent otherwise by design); `rule_engine_db`
+    showed zero `Rule` rows for that tenant. Not a bug -- working exactly
+    as built -- but an easy, silent trap for any brand-new tenant.
+
+    Considered and rejected a naive full fix: analytics-service and
+    ai-service both independently consume the same `event.created`
+    stream regardless of whether any rule matches (daily charts, AI
+    analysis respectively), so rejecting ingestion whenever a *specific*
+    event's conditions don't ultimately produce a notification would
+    silently blind both of those already-working features too. Landed,
+    per explicit direction, on a narrower synchronous guard: `POST
+    /events` now calls a new `HasMatchingRule` gRPC method on
+    rule-engine-service (`hasEnabledRuleForType`, same eventType-or-`"*"`
+    match `findActiveForEvaluation` already used, `count()`-based) before
+    creating the `Event` row at all, rejecting with 400 and an actionable
+    message if nothing matches. Deliberately scoped to eventType only,
+    not each matched rule's `conditions` -- that depends on the payload
+    and would mean re-running the in-memory evaluator on every ingest,
+    so a rule matching by type whose conditions would still reject the
+    real payload can still let an event through with no resulting
+    notification; that boundary was called out rather than silently
+    left implicit. This also gives event-service its first-ever
+    synchronous dependency on another business service rather than only
+    RabbitMQ -- if rule-engine-service is down, ingestion now fails too.
+
+    Verified live: a fresh tenant with zero rules got a 400 with the
+    exact intended message; creating a rule for `order.failed` made the
+    identical event type succeed (201); a second, unrelated event type
+    against that same tenant (still no wildcard rule) 400'd again.
+    `hasMatchingRuleViaGrpc` added to `@ai-notification/grpc` (consumed
+    by any service, in principle, though only event-service uses it
+    today). Full workspace build+lint clean.

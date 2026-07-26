@@ -617,3 +617,132 @@ export async function validateApiKeyViaGrpc(
     client.close();
   }
 }
+
+interface ListAllTenantsWireResponse {
+  list: FullTenantWireMessage[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// Platform-wide (Super Admin) -- not scoped to the caller's own
+// memberships.
+export async function listAllTenantsViaGrpc(
+  address: string,
+  requesterId: string,
+  query: ListQueryParams,
+): Promise<PaginatedResult<TenantResult>> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; query: ListQueryWireMessage },
+      ListAllTenantsWireResponse
+    >(client, "ListAllTenants", { requester_id: requesterId, query: toQueryWire(query) });
+    return {
+      list: response.list.map(toTenantResult),
+      total: response.total,
+      page: response.page,
+      pageSize: response.page_size,
+    };
+  } finally {
+    client.close();
+  }
+}
+
+export async function setTenantStatusViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+  status: string,
+): Promise<TenantResult> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; tenant_id: string; status: string },
+      FullTenantWireMessage
+    >(client, "SetTenantStatus", { requester_id: requesterId, tenant_id: tenantId, status });
+    return toTenantResult(response);
+  } finally {
+    client.close();
+  }
+}
+
+interface BillingUrlWireResponse {
+  url: string;
+}
+
+export async function createCheckoutSessionViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+  plan: string,
+): Promise<{ url: string }> {
+  const client = createClient(address);
+  try {
+    return await callUnary<
+      { requester_id: string; tenant_id: string; plan: string },
+      BillingUrlWireResponse
+    >(client, "CreateCheckoutSession", { requester_id: requesterId, tenant_id: tenantId, plan });
+  } finally {
+    client.close();
+  }
+}
+
+export async function createPortalSessionViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+): Promise<{ url: string }> {
+  const client = createClient(address);
+  try {
+    return await callUnary<{ requester_id: string; tenant_id: string }, BillingUrlWireResponse>(
+      client,
+      "CreatePortalSession",
+      { requester_id: requesterId, tenant_id: tenantId },
+    );
+  } finally {
+    client.close();
+  }
+}
+
+export async function cancelSubscriptionViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+): Promise<void> {
+  const client = createClient(address);
+  try {
+    await callUnary<{ requester_id: string; tenant_id: string }, SuccessWireResponse>(
+      client,
+      "CancelSubscription",
+      { requester_id: requesterId, tenant_id: tenantId },
+    );
+  } finally {
+    client.close();
+  }
+}
+
+// Internal-only (no requesterId) -- called by api-gateway's Stripe
+// webhook controller after it has already verified the signature.
+export async function applyStripeWebhookEventViaGrpc(
+  address: string,
+  kind: "checkout.completed" | "subscription.canceled",
+  tenantId: string,
+  plan: string,
+  subscriptionId: string,
+): Promise<void> {
+  const client = createClient(address);
+  try {
+    await callUnary<
+      { kind: string; tenant_id: string; plan: string; subscription_id: string },
+      SuccessWireResponse
+    >(client, "ApplyStripeWebhookEvent", {
+      kind,
+      tenant_id: tenantId,
+      plan,
+      subscription_id: subscriptionId,
+    });
+  } finally {
+    client.close();
+  }
+}

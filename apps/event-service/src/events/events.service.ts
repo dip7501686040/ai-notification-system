@@ -1,6 +1,12 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
-import { checkMembershipViaGrpc } from "@ai-notification/grpc";
+import { checkMembershipViaGrpc, hasMatchingRuleViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import type { Prisma, Event } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -43,6 +49,19 @@ export class EventsService extends BaseCrudService<
   }
 
   private async ingestForTenant(tenantId: string, dto: CreateEventDto): Promise<Event> {
+    // Synchronous guard: reject the event outright if nothing in
+    // rule-engine-service could ever fire on it, rather than accepting
+    // it and silently producing zero notifications. Only checks
+    // eventType (exact or wildcard "*"), not each rule's `conditions` --
+    // that depends on the payload and would mean re-running the
+    // in-memory evaluator on every ingest.
+    const hasMatch = await hasMatchingRuleViaGrpc(env.RULE_ENGINE_GRPC_ADDRESS, tenantId, dto.type);
+    if (!hasMatch) {
+      throw new BadRequestException(
+        `No enabled rule matches event type "${dto.type}" for this tenant. Create a rule for this event type (or a wildcard "*" rule) before sending it.`,
+      );
+    }
+
     const event = await super.create({
       tenantId,
       type: dto.type,

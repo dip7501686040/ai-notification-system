@@ -12,6 +12,8 @@ export default tseslint.config(
       "**/coverage/**",
       "**/.venv/**",
       "**/generated/**",
+      "**/.next/**",
+      "**/next-env.d.ts",
     ],
   },
   js.configs.recommended,

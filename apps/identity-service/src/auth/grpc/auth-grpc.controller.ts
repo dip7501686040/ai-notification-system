@@ -16,6 +16,7 @@ interface ValidateTokenResponse {
   valid: boolean;
   user_id: string;
   email: string;
+  is_super_admin: boolean;
   error: string;
 }
 
@@ -24,6 +25,7 @@ interface UserMessage {
   email: string;
   name: string;
   provider: string;
+  is_super_admin: boolean;
 }
 
 interface AuthResultMessage {
@@ -68,7 +70,13 @@ interface ResetPasswordRequest {
 }
 
 function toUserMessage(user: SafeUser): UserMessage {
-  return { id: user.id, email: user.email, name: user.name ?? "", provider: user.provider };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name ?? "",
+    provider: user.provider,
+    is_super_admin: user.isSuperAdmin,
+  };
 }
 
 function toAuthResultMessage(result: AuthResult): AuthResultMessage {
@@ -88,13 +96,25 @@ export class AuthGrpcController {
       const payload = this.jwt.verify<AuthTokenPayload>(data.token);
       const user = await this.authService.findById(payload.sub);
       if (!user) {
-        return { valid: false, user_id: "", email: "", error: "User not found" };
+        return {
+          valid: false,
+          user_id: "",
+          email: "",
+          is_super_admin: false,
+          error: "User not found",
+        };
       }
 
-      return { valid: true, user_id: user.id, email: user.email, error: "" };
+      return {
+        valid: true,
+        user_id: user.id,
+        email: user.email,
+        is_super_admin: user.isSuperAdmin,
+        error: "",
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid token";
-      return { valid: false, user_id: "", email: "", error: message };
+      return { valid: false, user_id: "", email: "", is_super_admin: false, error: message };
     }
   }
 

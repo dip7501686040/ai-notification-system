@@ -11,7 +11,13 @@ import { env } from "./env";
 
 async function bootstrap() {
   const logger = createLogger("api-gateway");
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true adds req.rawBody alongside the normally-parsed JSON
+  // body -- needed only by the Stripe webhook route, to verify its
+  // signature against the exact bytes Stripe signed.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
+
+  // Bearer tokens, not cookies -- credentials stays false.
+  app.enableCors({ origin: env.FRONTEND_URL });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

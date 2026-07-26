@@ -10,8 +10,10 @@ import {
   type Paginated,
   type RawListQuery,
 } from "@ai-notification/common";
+import { getUserViaGrpc } from "@ai-notification/grpc";
 import type { Prisma, Tenant, TenantMember } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
+import { env } from "../env";
 import type { CreateTenantDto } from "./dto/create-tenant.dto";
 import type { UpdateTenantDto } from "./dto/update-tenant.dto";
 import type { AddMemberDto, TenantRole } from "./dto/add-member.dto";
@@ -184,6 +186,30 @@ export class TenantsService extends BaseCrudService<
     return this.prisma.tenantMember.findUnique({
       where: { tenantId_userId: { tenantId, userId } },
     });
+  }
+
+  // Platform-wide, not scoped to the caller's own memberships at all --
+  // a super admin isn't necessarily a member of any given tenant.
+  // Authorization is defense-in-depth: api-gateway's SuperAdminGuard
+  // fast-fails first, but this independently re-confirms via
+  // identity-service rather than trusting the gateway alone (same
+  // reasoning as every other cross-service check in this codebase).
+  async findAllAsAdmin(requesterId: string, query: RawListQuery): Promise<Paginated<Tenant>> {
+    await this.requireSuperAdmin(requesterId);
+    return this.list(query, { searchableFields: TENANT_SEARCHABLE_FIELDS });
+  }
+
+  async setStatusAsAdmin(requesterId: string, tenantId: string, status: string): Promise<Tenant> {
+    await this.requireSuperAdmin(requesterId);
+    await this.getTenantOrThrow(tenantId);
+    return super.update({ id: tenantId }, { status });
+  }
+
+  private async requireSuperAdmin(requesterId: string): Promise<void> {
+    const result = await getUserViaGrpc(env.IDENTITY_AUTH_GRPC_ADDRESS, requesterId);
+    if (!result.found || !result.user?.isSuperAdmin) {
+      throw new ForbiddenException("Super admin access required");
+    }
   }
 
   private async getTenantOrThrow(tenantId: string): Promise<Tenant> {

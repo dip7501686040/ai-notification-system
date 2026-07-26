@@ -6,6 +6,7 @@ export interface ValidateTokenResult {
   valid: boolean;
   userId: string;
   email: string;
+  isSuperAdmin: boolean;
   error: string;
 }
 
@@ -16,6 +17,7 @@ interface ValidateTokenWireResponse {
   valid: boolean;
   user_id: string;
   email: string;
+  is_super_admin: boolean;
   error: string;
 }
 
@@ -47,7 +49,7 @@ export function validateTokenViaGrpc(
       client.close();
 
       if (error) {
-        resolve({ valid: false, userId: "", email: "", error: error.message });
+        resolve({ valid: false, userId: "", email: "", isSuperAdmin: false, error: error.message });
         return;
       }
 
@@ -55,6 +57,7 @@ export function validateTokenViaGrpc(
         valid: response.valid,
         userId: response.user_id,
         email: response.email,
+        isSuperAdmin: response.is_super_admin,
         error: response.error,
       });
     });
@@ -66,6 +69,7 @@ export interface AuthUser {
   email: string;
   name: string;
   provider: string;
+  isSuperAdmin: boolean;
 }
 
 export interface AuthResult {
@@ -73,8 +77,16 @@ export interface AuthResult {
   accessToken: string;
 }
 
+interface UserWireMessage {
+  id: string;
+  email: string;
+  name: string;
+  provider: string;
+  is_super_admin: boolean;
+}
+
 interface AuthResultWireMessage {
-  user: AuthUser;
+  user: UserWireMessage;
   access_token: string;
 }
 
@@ -85,8 +97,18 @@ function createAuthClient(address: string): grpc.Client {
   return new proto.auth.v1.Auth(address, grpc.credentials.createInsecure());
 }
 
+function toAuthUser(wire: UserWireMessage): AuthUser {
+  return {
+    id: wire.id,
+    email: wire.email,
+    name: wire.name,
+    provider: wire.provider,
+    isSuperAdmin: wire.is_super_admin,
+  };
+}
+
 function toAuthResult(wire: AuthResultWireMessage): AuthResult {
-  return { user: wire.user, accessToken: wire.access_token };
+  return { user: toAuthUser(wire.user), accessToken: wire.access_token };
 }
 
 export async function registerViaGrpc(
@@ -131,11 +153,11 @@ export async function getUserViaGrpc(
 ): Promise<{ found: boolean; user: AuthUser | null }> {
   const client = createAuthClient(address);
   try {
-    return await callUnary<{ user_id: string }, { found: boolean; user: AuthUser | null }>(
-      client,
-      "GetUser",
-      { user_id: userId },
-    );
+    const response = await callUnary<
+      { user_id: string },
+      { found: boolean; user: UserWireMessage | null }
+    >(client, "GetUser", { user_id: userId });
+    return { found: response.found, user: response.user ? toAuthUser(response.user) : null };
   } finally {
     client.close();
   }

@@ -26,6 +26,7 @@ export interface SafeUser {
   email: string;
   name: string | null;
   provider: string;
+  isSuperAdmin: boolean;
 }
 
 export interface AuthResult {
@@ -34,7 +35,13 @@ export interface AuthResult {
 }
 
 function toSafeUser(user: User): SafeUser {
-  return { id: user.id, email: user.email, name: user.name, provider: user.provider };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    provider: user.provider,
+    isSuperAdmin: user.isSuperAdmin,
+  };
 }
 
 @Injectable()

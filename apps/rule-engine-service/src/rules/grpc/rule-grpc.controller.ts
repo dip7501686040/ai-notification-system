@@ -71,6 +71,15 @@ interface DeleteRuleRequest {
   rule_id: string;
 }
 
+interface HasMatchingRuleRequest {
+  tenant_id: string;
+  event_type: string;
+}
+
+interface HasMatchingRuleResponse {
+  has_match: boolean;
+}
+
 function toRuleMessage(rule: Rule): RuleMessage {
   return {
     id: rule.id,
@@ -149,5 +158,11 @@ export class RuleGrpcController {
   async deleteRule(data: DeleteRuleRequest): Promise<SuccessResponse> {
     await this.rulesService.remove(data.rule_id, data.requester_id);
     return { success: true };
+  }
+
+  @GrpcMethod("Rule", "HasMatchingRule")
+  async hasMatchingRule(data: HasMatchingRuleRequest): Promise<HasMatchingRuleResponse> {
+    const hasMatch = await this.rulesService.hasEnabledRuleForType(data.tenant_id, data.event_type);
+    return { has_match: hasMatch };
   }
 }

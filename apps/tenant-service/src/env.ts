@@ -8,6 +8,12 @@ const schema = z.object({
   DATABASE_URL: z.string(),
   IDENTITY_AUTH_GRPC_ADDRESS: z.string().default("identity-service:50152"),
   RABBITMQ_URL: z.string().default("amqp://guest:guest@rabbitmq:5672"),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_PRICE_PRO: z.string().optional(),
+  STRIPE_PRICE_ENTERPRISE: z.string().optional(),
+  FRONTEND_URL: z.string().default("http://localhost:3000"),
 });
 
 export const env = loadEnv(schema);
+
+export const isStripeConfigured = Boolean(env.STRIPE_SECRET_KEY);

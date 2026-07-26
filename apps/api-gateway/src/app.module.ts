@@ -16,6 +16,9 @@ import { NotificationsController } from "./notifications/notifications.controlle
 import { AnalyticsController } from "./analytics/analytics.controller";
 import { AuditController } from "./audit/audit.controller";
 import { ApiKeysController } from "./api-keys/api-keys.controller";
+import { AdminTenantsController } from "./admin/admin-tenants.controller";
+import { BillingController } from "./tenants/billing.controller";
+import { StripeWebhookController } from "./webhooks/stripe-webhook.controller";
 import { NotificationsGateway } from "./notifications/notifications.gateway";
 import { NotificationPushConsumerService } from "./notifications/notification-push-consumer.service";
 import { AiController } from "./ai/ai.controller";
@@ -38,6 +41,9 @@ const controllers: Type<unknown>[] = [
   AnalyticsController,
   AuditController,
   ApiKeysController,
+  AdminTenantsController,
+  BillingController,
+  StripeWebhookController,
 ];
 const providers: Type<unknown>[] = [
   NotificationsGateway,

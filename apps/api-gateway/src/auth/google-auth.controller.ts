@@ -18,9 +18,13 @@ export class GoogleAuthController {
   @UseGuards(AuthGuard("google"))
   async callback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const profile = req.user as GoogleOAuthUser;
-    const result = await grpcCall(() =>
-      validateOAuthUserViaGrpc(env.IDENTITY_AUTH_GRPC_ADDRESS, profile),
-    );
-    res.json(result);
+    try {
+      const result = await grpcCall(() =>
+        validateOAuthUserViaGrpc(env.IDENTITY_AUTH_GRPC_ADDRESS, profile),
+      );
+      res.redirect(`${env.FRONTEND_URL}/auth/callback?token=${result.accessToken}`);
+    } catch {
+      res.redirect(`${env.FRONTEND_URL}/login?error=oauth_failed`);
+    }
   }
 }
