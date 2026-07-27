@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import {
   checkMembershipViaGrpc,
@@ -6,6 +6,7 @@ import {
   renderTemplateViaGrpc,
 } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
 import type { Notification, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env, retryBackoffMs } from "../env";
@@ -38,7 +39,7 @@ export class NotificationsService extends BaseCrudService<
   Prisma.NotificationWhereInput,
   Prisma.NotificationOrderByWithRelationInput
 > {
-  private readonly logger = new Logger(NotificationsService.name);
+  private readonly logger = createLogger("notification-service");
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,7 +65,8 @@ export class NotificationsService extends BaseCrudService<
   ): Promise<void> {
     if (!Array.isArray(actions)) {
       this.logger.warn(
-        `Ignoring rule match ${ruleId} for event ${eventId}: actions is not an array`,
+        { tenantId, ruleId, eventId },
+        "Ignoring rule match: actions is not an array",
       );
       return;
     }
@@ -74,7 +76,8 @@ export class NotificationsService extends BaseCrudService<
     for (const action of actions) {
       if (!isValidAction(action)) {
         this.logger.warn(
-          `Skipping malformed action for rule ${ruleId}/event ${eventId}: ${JSON.stringify(action)}`,
+          { tenantId, ruleId, eventId, action },
+          "Skipping malformed action for rule match",
         );
         continue;
       }

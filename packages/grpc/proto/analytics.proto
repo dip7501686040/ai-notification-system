@@ -59,8 +59,24 @@ message GetNotificationStatsResponse {
   double total_estimated_cost = 5;
 }
 
+message GetObservabilityLinksRequest {
+  string requester_id = 1;
+  string tenant_id = 2;
+}
+
+// URLs are built server-side with the caller's own (membership-checked)
+// tenant_id baked in -- never accept a tenant_id from the browser for
+// these, or a tenant could just edit the query param to view another
+// tenant's dashboard.
+message GetObservabilityLinksResponse {
+  string metrics_logs_url = 1;
+  string traces_url = 2;
+  string system_health_url = 3;
+}
+
 service Analytics {
   rpc GetDailyEvents(GetDailyEventsRequest) returns (GetDailyEventsResponse);
   rpc GetTopSources(GetTopSourcesRequest) returns (GetTopSourcesResponse);
   rpc GetNotificationStats(GetNotificationStatsRequest) returns (GetNotificationStatsResponse);
+  rpc GetObservabilityLinks(GetObservabilityLinksRequest) returns (GetObservabilityLinksResponse);
 }

@@ -28,6 +28,12 @@ export interface NotificationStats {
   totalEstimatedCost: number;
 }
 
+export interface ObservabilityLinks {
+  metricsLogsUrl: string;
+  tracesUrl: string;
+  systemHealthUrl: string;
+}
+
 const DEFAULT_DAYS = 30;
 const DEFAULT_TOP_SOURCES_LIMIT = 10;
 
@@ -115,6 +121,26 @@ export class AnalyticsService {
     const successRate = totalSent + totalFailed > 0 ? totalSent / (totalSent + totalFailed) : 0;
 
     return { byChannel, totalSent, totalFailed, successRate, totalEstimatedCost };
+  }
+
+  // Builds Grafana/Jaeger embed URLs with tenantId baked in server-side
+  // (only after the membership check below) -- the frontend just renders
+  // these in an iframe, it never constructs or edits the tenant_id itself.
+  async getObservabilityLinks(tenantId: string, requesterId: string): Promise<ObservabilityLinks> {
+    await this.assertMembership(tenantId, requesterId);
+
+    const encodedTenantId = encodeURIComponent(tenantId);
+    const tracesTags = encodeURIComponent(JSON.stringify({ "tenant.id": tenantId }));
+
+    return {
+      metricsLogsUrl: `${env.GRAFANA_PUBLIC_URL}/d/tenant-observability/tenant-observability?var-tenant_id=${encodedTenantId}&kiosk`,
+      // service=api-gateway: that's where TenantMetricsInterceptor tags
+      // the root span with tenant.id, so it's always the right service
+      // to search on regardless of which downstream service the request
+      // eventually touched.
+      tracesUrl: `${env.JAEGER_PUBLIC_URL}/search?service=api-gateway&tags=${tracesTags}`,
+      systemHealthUrl: `${env.GRAFANA_PUBLIC_URL}/d/platform-health/platform-health?kiosk`,
+    };
   }
 
   // No notFoundOnFailure variant needed here (unlike every other

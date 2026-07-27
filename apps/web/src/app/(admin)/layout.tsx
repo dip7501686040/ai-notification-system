@@ -2,13 +2,15 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
+import { ArrowLeft, Activity, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { UserMenu } from "@/components/user-menu";
+import { cn } from "@/lib/utils";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
@@ -43,13 +45,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
         <nav className="flex flex-col gap-1 p-2">
-          <Link
-            href="/admin/tenants"
-            className="flex items-center gap-2 rounded-md bg-admin/10 px-3 py-2 text-sm font-medium text-admin"
-          >
-            <ShieldCheck className="size-4" />
-            Tenants
-          </Link>
+          {[
+            { href: "/admin/tenants", label: "Tenants", icon: ShieldCheck },
+            { href: "/admin/platform-health", label: "Platform Health", icon: Activity },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-admin/10 text-admin"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4" />
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="mt-auto flex flex-col gap-1 border-t border-border p-2">
           <Link

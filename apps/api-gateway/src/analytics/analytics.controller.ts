@@ -4,6 +4,7 @@ import {
   getDailyEventsViaGrpc,
   getTopSourcesViaGrpc,
   getNotificationStatsViaGrpc,
+  getObservabilityLinksViaGrpc,
 } from "@ai-notification/grpc";
 import { grpcCall } from "../grpc-call";
 import { env } from "../env";
@@ -74,6 +75,18 @@ export class AnalyticsController {
         tenantId,
         parseIntOrUndefined(query.days),
       ),
+    );
+  }
+
+  // tenantId here is only ever the caller's own -- analytics-service
+  // re-derives it server-side after its own membership check and bakes it
+  // into the returned Grafana/Jaeger URLs, so this endpoint can't be used
+  // to mint a link for a tenant the caller doesn't belong to.
+  @Get("observability-links")
+  observabilityLinks(@Req() req: Request, @Query() query: { tenantId?: string }) {
+    const tenantId = requireTenantId(query.tenantId);
+    return grpcCall(() =>
+      getObservabilityLinksViaGrpc(env.ANALYTICS_GRPC_ADDRESS, currentUser(req).id, tenantId),
     );
   }
 }

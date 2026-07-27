@@ -1,5 +1,6 @@
-import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import { Injectable, type OnModuleInit } from "@nestjs/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
 import type { Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { RulesService } from "./rules.service";
@@ -24,7 +25,7 @@ interface EventCreatedMessage {
 // evaluates each tenant's active rules against it.
 @Injectable()
 export class RuleConsumerService implements OnModuleInit {
-  private readonly logger = new Logger(RuleConsumerService.name);
+  private readonly logger = createLogger("rule-engine-service");
 
   constructor(
     private readonly rabbitmq: RabbitMQService,
@@ -83,7 +84,10 @@ export class RuleConsumerService implements OnModuleInit {
         matchedAt: new Date().toISOString(),
       });
 
-      this.logger.log(`Rule "${rule.name}" (${rule.id}) matched event ${message.eventId}`);
+      this.logger.info(
+        { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
+        `Rule "${rule.name}" matched event`,
+      );
     }
   }
 }

@@ -54,6 +54,17 @@ interface GetNotificationStatsResponse {
   total_estimated_cost: number;
 }
 
+interface GetObservabilityLinksRequest {
+  requester_id: string;
+  tenant_id: string;
+}
+
+interface GetObservabilityLinksResponse {
+  metrics_logs_url: string;
+  traces_url: string;
+  system_health_url: string;
+}
+
 @Controller()
 export class AnalyticsGrpcController {
   constructor(private readonly analyticsService: AnalyticsService) {}
@@ -99,6 +110,21 @@ export class AnalyticsGrpcController {
       total_failed: result.totalFailed,
       success_rate: result.successRate,
       total_estimated_cost: result.totalEstimatedCost,
+    };
+  }
+
+  @GrpcMethod("Analytics", "GetObservabilityLinks")
+  async getObservabilityLinks(
+    data: GetObservabilityLinksRequest,
+  ): Promise<GetObservabilityLinksResponse> {
+    const links = await this.analyticsService.getObservabilityLinks(
+      data.tenant_id,
+      data.requester_id,
+    );
+    return {
+      metrics_logs_url: links.metricsLogsUrl,
+      traces_url: links.tracesUrl,
+      system_health_url: links.systemHealthUrl,
     };
   }
 }

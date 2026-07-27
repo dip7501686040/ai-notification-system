@@ -27,6 +27,12 @@ export interface NotificationStats {
   totalEstimatedCost: number;
 }
 
+export interface ObservabilityLinks {
+  metricsLogsUrl: string;
+  tracesUrl: string;
+  systemHealthUrl: string;
+}
+
 interface DailyEventCountWireMessage {
   date: string;
   count: number;
@@ -58,6 +64,12 @@ interface GetNotificationStatsWireResponse {
   total_failed: number;
   success_rate: number;
   total_estimated_cost: number;
+}
+
+interface GetObservabilityLinksWireResponse {
+  metrics_logs_url: string;
+  traces_url: string;
+  system_health_url: string;
 }
 
 function createClient(address: string): grpc.Client {
@@ -140,6 +152,30 @@ export async function getNotificationStatsViaGrpc(
       totalFailed: response.total_failed,
       successRate: response.success_rate,
       totalEstimatedCost: response.total_estimated_cost,
+    };
+  } finally {
+    client.close();
+  }
+}
+
+export async function getObservabilityLinksViaGrpc(
+  address: string,
+  requesterId: string,
+  tenantId: string,
+): Promise<ObservabilityLinks> {
+  const client = createClient(address);
+  try {
+    const response = await callUnary<
+      { requester_id: string; tenant_id: string },
+      GetObservabilityLinksWireResponse
+    >(client, "GetObservabilityLinks", {
+      requester_id: requesterId,
+      tenant_id: tenantId,
+    });
+    return {
+      metricsLogsUrl: response.metrics_logs_url,
+      tracesUrl: response.traces_url,
+      systemHealthUrl: response.system_health_url,
     };
   } finally {
     client.close();

@@ -2,12 +2,12 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import { checkMembershipViaGrpc, hasMatchingRuleViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
 import type { Prisma, Event } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env } from "../env";
@@ -26,7 +26,7 @@ export class EventsService extends BaseCrudService<
   Prisma.EventWhereInput,
   Prisma.EventOrderByWithRelationInput
 > {
-  private readonly logger = new Logger(EventsService.name);
+  private readonly logger = createLogger("event-service");
 
   constructor(
     private readonly prisma: PrismaService,
@@ -82,7 +82,8 @@ export class EventsService extends BaseCrudService<
       return await super.update({ id: event.id }, { status: "published" });
     } catch (error) {
       this.logger.error(
-        `Failed to publish event ${event.id}: ${error instanceof Error ? error.message : error}`,
+        { tenantId: event.tenantId, eventId: event.id, error },
+        "Failed to publish event",
       );
       return super.update({ id: event.id }, { status: "failed" });
     }

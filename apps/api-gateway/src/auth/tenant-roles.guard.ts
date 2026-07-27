@@ -11,6 +11,7 @@ import { checkMembershipViaGrpc } from "@ai-notification/grpc";
 import { env } from "../env";
 import { ROLES_KEY } from "./roles.decorator";
 import type { AuthenticatedUser } from "./grpc-auth.guard";
+import { resolveTenantId } from "./resolve-tenant-id";
 
 // Fast-fail companion to each service's own (authoritative) role check --
 // resolves tenantId from body/query/params without an extra fetch, so it
@@ -29,13 +30,7 @@ export class TenantRolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const user = (request as Request & { user: AuthenticatedUser }).user;
-    const body = request.body as Record<string, unknown> | undefined;
-    const query = request.query as Record<string, unknown> | undefined;
-    const params = request.params as Record<string, unknown> | undefined;
-    const tenantId =
-      (typeof body?.tenantId === "string" ? body.tenantId : undefined) ??
-      (typeof query?.tenantId === "string" ? query.tenantId : undefined) ??
-      (typeof params?.id === "string" ? params.id : undefined);
+    const tenantId = resolveTenantId(request);
 
     if (!tenantId) {
       throw new BadRequestException("tenantId could not be resolved for this route");

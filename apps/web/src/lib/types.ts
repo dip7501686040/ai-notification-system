@@ -174,3 +174,9 @@ export interface AiConfig {
   provider: string;
   model: string;
 }
+
+export interface ObservabilityLinks {
+  metricsLogsUrl: string;
+  tracesUrl: string;
+  systemHealthUrl: string;
+}

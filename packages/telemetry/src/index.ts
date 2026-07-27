@@ -7,6 +7,7 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { Resource } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import { trace, metrics, type Meter } from "@opentelemetry/api";
 
 export function initTelemetry(serviceName: string): NodeSDK {
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4317";
@@ -32,4 +33,16 @@ export function initTelemetry(serviceName: string): NodeSDK {
   });
 
   return sdk;
+}
+
+// Tags the currently active span with the tenant it belongs to, so traces
+// stay searchable by tenant in Jaeger without every service needing its
+// own span-tagging code -- tagging the request's root span is enough,
+// since Jaeger indexes tags across the whole trace.
+export function tagTenant(tenantId: string): void {
+  trace.getActiveSpan()?.setAttribute("tenant.id", tenantId);
+}
+
+export function getMeter(name: string): Meter {
+  return metrics.getMeter(name);
 }

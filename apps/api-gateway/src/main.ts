@@ -7,6 +7,7 @@ import { grpcHealthMicroserviceOptions } from "@ai-notification/grpc";
 import { AppModule } from "./app.module";
 import { createLogger } from "@ai-notification/logger";
 import { RedisIoAdapter } from "./notifications/redis-io.adapter";
+import { TenantMetricsInterceptor } from "./observability/tenant-metrics.interceptor";
 import { env } from "./env";
 
 async function bootstrap() {
@@ -20,6 +21,7 @@ async function bootstrap() {
   app.enableCors({ origin: env.FRONTEND_URL });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalInterceptors(new TenantMetricsInterceptor());
 
   const redisIoAdapter = new RedisIoAdapter(app, env.REDIS_URL);
   await redisIoAdapter.connectToRedis();

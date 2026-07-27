@@ -8,6 +8,11 @@ const schema = z.object({
   DATABASE_URL: z.string(),
   RABBITMQ_URL: z.string().default("amqp://guest:guest@rabbitmq:5672"),
   TENANT_GRPC_ADDRESS: z.string().default("tenant-service:50153"),
+  // Browser-facing, not the docker-network hostnames -- these get embedded
+  // as iframe src URLs in the tenant's browser, so they must be reachable
+  // from outside the compose network.
+  GRAFANA_PUBLIC_URL: z.string().default("http://localhost:3011"),
+  JAEGER_PUBLIC_URL: z.string().default("http://localhost:16686"),
   // Estimated cost per notification sent on a given channel -- an
   // explicit estimate, not real billing, since no cost/pricing concept
   // exists anywhere else in the codebase.

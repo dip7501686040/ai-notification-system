@@ -1994,9 +1994,11 @@ Features
 
     Also added, as part of this pass since none of it existed yet:
     forgot/reset-password (`PasswordResetToken` model, SHA-256-hashed
-    tokens, 1h expiry; no SMTP configured in this environment so the
-    reset token is logged rather than emailed, same "no real credentials
-    here" stance as Google OAuth) and moved Google OAuth's strategy/
+    tokens, 1h expiry; no SMTP configured in this environment at the
+    time, so the reset token was logged rather than emailed -- same "no
+    real credentials here" stance as Google OAuth then; real SMTP
+    credentials were configured later, see entry 23) and moved Google
+    OAuth's strategy/
     controller from identity-service to api-gateway entirely -- the
     browser has to reach the OAuth redirect/callback directly, so that
     can't live behind the gRPC boundary; the callback now calls
@@ -2690,3 +2692,119 @@ Features
     `hasMatchingRuleViaGrpc` added to `@ai-notification/grpc` (consumed
     by any service, in principle, though only event-service uses it
     today). Full workspace build+lint clean.
+
+22. ✅ Tenant-scoped observability: request/error tracking, logs, traces,
+    and resource usage, surfaced inside the tenant dashboard itself.
+    The platform already ran a full OTel -> {Jaeger, Prometheus, Loki} ->
+    Grafana stack, but as admin-only tooling with no tenant awareness --
+    nothing tagged `tenant_id` on spans/metrics/logs, and none of it was
+    reachable from the product. Rather than build custom charts, Grafana
+    and Jaeger's own UIs do the actual rendering; the work was making
+    them tenant-safe to embed and wiring the tenant_id through.
+    `TenantMetricsInterceptor` (new, global, `api-gateway`) tags every
+    request's root trace span with `tenant.id` and records
+    `gateway_requests_total`/`gateway_request_duration_ms`/
+    `gateway_errors_total` Prometheus counters by tenant -- since trace
+    context already propagates automatically to every downstream
+    service, tagging just the root span is enough to make full traces
+    searchable by tenant in Jaeger with zero changes to the other ten
+    services. Log enrichment was more mechanical: several services
+    (`notification-service`, `event-service`, `rule-engine-service`)
+    were using Nest's default `Logger`, which never reached Loki at all
+    (only `@ai-notification/logger`'s pino instance, bridged via
+    `@opentelemetry/instrumentation-pino`, does) -- swapped to pino and
+    added `tenantId` to the existing tenant-scoped log calls. `cAdvisor`
+    added to `docker-compose.yml`/Prometheus scrape config for
+    per-container CPU/memory. Two dashboards provisioned the same way
+    the existing Grafana datasources already were (file-based,
+    `infra/grafana/provisioning/dashboards/`): `tenant-observability`
+    (templated on `$tenant_id`) and `platform-health` (unfiltered,
+    per-tenant breakdown, Super Admin only). `analytics-service` gained
+    a new `GetObservabilityLinks` gRPC method (same membership-check
+    pattern as its existing endpoints) that builds Grafana/Jaeger embed
+    URLs with the caller's own tenantId baked in server-side -- never
+    accepted from the client -- since neither Grafana's nor Jaeger's OSS
+    anonymous-access mode has any native per-tenant ACL. New
+    `/dashboard/observability` (tenant) and `/admin/platform-health`
+    (Super Admin) pages in `apps/web` just render those URLs in
+    `<iframe>`s.
+
+    Four real bugs caught, not simulated: a pre-existing
+    `ignoreDeprecations: "6.0"` in `packages/typescript-config`,
+    incompatible with the TypeScript version actually installed
+    (5.9.3), broke every Docker build in the repo -- unrelated to this
+    pass but blocking verification of it, fixed to `"5.0"`. Grafana
+    blocks iframe embedding by default (`X-Frame-Options: deny`); the
+    embedded dashboards loaded fine as a direct URL but showed "refused
+    to connect" only inside the app's `<iframe>` -- fixed with
+    `GF_SECURITY_ALLOW_EMBEDDING=true`. The generated Jaeger search URL
+    omitted the required `service` query param (`parameter 'service' is
+    required`) -- fixed by pointing it at `api-gateway`, since that's
+    where the tenant-tagged root span always originates regardless of
+    which downstream service a request eventually touches. Loki's LogQL
+    needed explicit JSON path extraction
+    (`| json tenantId="attributes.tenantId"`) rather than a flat
+    `| json | tenantId=...`, since pino's merged log fields land nested
+    under `attributes` in the OTel-exported log body, not promoted to a
+    Loki label.
+
+    Verified live against the real running stack, not just unit-level:
+    registered a fresh tenant, generated real traffic and a real error,
+    and independently confirmed `gateway_requests_total`/
+    `gateway_errors_total` carry the correct `tenant_id` in Prometheus,
+    traces are searchable by `tenant.id` in Jaeger, and the Logs panel
+    renders correctly through Grafana's own datasource proxy (not just
+    raw Prometheus/Loki queries) scoped to one tenant and empty for
+    another.
+
+23. ✅ Multi-tenant demo dataset + client-facing walkthrough
+    documentation.
+    Seeded two tenants under one real account specifically to
+    demonstrate both data isolation and RBAC in the same walkthrough:
+    owner of "Observability Test Co", member (not owner) of a second,
+    separately-owned "Globex Freight Co" -- so a demo can show the same
+    login switching tenants and having genuinely different permissions
+    in each, re-verified at the API level (403 on a member's write
+    attempt, 403 reading another tenant's audit log, zero cross-tenant
+    data returned) rather than just visually. Exercised the full
+    events -> rules -> notifications loop with a deliberately mixed
+    outcome set -- a webhook success, a webhook that times out and
+    reaches `dead_letter` after retrying (proving the retry-with-backoff
+    path honestly reaches a terminal state rather than hanging), and
+    dashboard-channel notifications -- plus FR-10's API-key-authenticated
+    ingest path, and pointed the tenant's `TenantAiConfig` at a local
+    Ollama model (`qwen2.5:0.5b`) so AI analysis (summary/severity/
+    business-impact/recommendation/duplicate-detection) runs for real,
+    at zero cost, with no external API key. `docs/demo-walkthrough.md`
+    (versioned in the repo) and `scripts/seed-demo-data.sh` (reproduces
+    the same dataset against a fresh stack) are the durable artifacts;
+    also published as a standalone page for sharing directly.
+
+    Caught a real security incident mid-pass, not a simulated one:
+    debugging why a test notification showed `sent` instead of the
+    expected failure revealed that real Gmail SMTP credentials are
+    configured in this environment's `.env` (contrary to the assumption
+    -- drawn from reading `channel-service`'s connector code -- that
+    SMTP was unconfigured here; see the entry-10 annotation above) --
+    and a debugging command briefly printed the app password into this
+    conversation's output. Flagged immediately rather than continuing
+    past it; the credential was rotated and `channel-service` recreated
+    to pick up the new value before triggering any further real email.
+    Independently confirmed via `git log --diff-filter=A -- '.env'
+    '.env.*'` that only `.env.example` (empty placeholders) was ever
+    committed -- the real `.env` was never in git history.
+
+    Also surfaced honestly rather than cherry-picked: the demo AI model
+    (`qwen2.5:0.5b`, chosen for zero-cost local inference, not accuracy)
+    correctly summarized and classified every seeded event, but did not
+    reliably flag near-duplicate incidents as duplicates across repeated
+    tests with near-identical text -- a model-capability limit, not a
+    platform bug, documented directly in the walkthrough as the reason a
+    production tenant should configure a stronger provider (one
+    `PUT /ai-config` call, per-tenant, no other change needed).
+
+    Verified live: notification channel-mix counts matched
+    `analytics-service`'s own aggregate output exactly; all 14 seeded
+    events produced a completed AI analysis via local Ollama; tenant
+    isolation and RBAC re-confirmed independently at the API layer, not
+    assumed from the UI alone.
