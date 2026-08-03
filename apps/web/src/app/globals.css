@@ -59,6 +59,43 @@
   --admin-foreground: oklch(0.145 0.01 30);
 }
 
+/* "Gradient" theme — a near-black indigo canvas with soft glowing violet,
+   fuchsia, and cyan "aurora" blobs pinned to the corners (see
+   `.gradient body` below). The canvas itself stays dark enough that the
+   near-white/gray theme text is always readable; the color lives in the
+   glow, not the base. Brand touchpoints (see .brand-* helper classes below)
+   float on top as frosted-glass black chips with a hairline border. */
+.gradient {
+  --background: oklch(0.13 0.02 280);
+  --foreground: oklch(0.97 0.005 285);
+  --card: oklch(0.18 0.025 285);
+  --card-foreground: oklch(0.97 0.005 285);
+  --popover: oklch(0.18 0.025 285);
+  --popover-foreground: oklch(0.97 0.005 285);
+  --primary: oklch(0.64 0.23 300);
+  --primary-foreground: oklch(0.98 0.01 300);
+  --secondary: oklch(0.25 0.035 285);
+  --secondary-foreground: oklch(0.95 0.01 285);
+  --muted: oklch(0.22 0.025 285);
+  --muted-foreground: oklch(0.76 0.025 285);
+  --accent: oklch(0.29 0.06 285);
+  --accent-foreground: oklch(0.97 0.01 285);
+  --destructive: oklch(0.7 0.2 22);
+  --destructive-foreground: oklch(0.145 0.01 22);
+  --success: oklch(0.72 0.16 160);
+  --success-foreground: oklch(0.145 0.01 160);
+  --warning: oklch(0.8 0.15 85);
+  --warning-foreground: oklch(0.2 0.02 85);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.66 0.2 300 / 0.6);
+  --admin: oklch(0.72 0.19 45);
+  --admin-foreground: oklch(0.145 0.02 45);
+  --gradient-from: oklch(0.6 0.23 300);
+  --gradient-via: oklch(0.62 0.25 340);
+  --gradient-to: oklch(0.75 0.16 195);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -98,4 +135,67 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Three soft radial glows (violet top-left, cyan top-right, fuchsia bottom)
+   over the dark canvas — an "aurora" wash that reads as colorful and modern
+   without ever pushing the background light enough to hurt text contrast. */
+.gradient body {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 60% 50% at 8% -10%, color-mix(in oklch, var(--gradient-from) 40%, transparent), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 105% -8%, color-mix(in oklch, var(--gradient-to) 32%, transparent), transparent 60%),
+    radial-gradient(ellipse 60% 45% at 45% 115%, color-mix(in oklch, var(--gradient-via) 28%, transparent), transparent 65%);
+  background-attachment: fixed;
+}
+
+/* Brand touchpoints: identical to the existing solid look under the default
+   and dark themes. Left unlayered so they win over Tailwind utility classes
+   on the same element. */
+.brand-icon {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.brand-admin-icon {
+  background-color: var(--admin);
+  color: var(--admin-foreground);
+}
+
+.brand-active {
+  background-color: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.brand-avatar {
+  background-color: var(--muted);
+}
+
+.brand-button {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+.brand-button:hover {
+  filter: brightness(0.94);
+}
+.brand-button:active {
+  transform: scale(0.98);
+}
+
+.gradient .brand-icon,
+.gradient .brand-admin-icon,
+.gradient .brand-active,
+.gradient .brand-avatar,
+.gradient .brand-button {
+  background-color: oklch(0 0 0 / 0.4);
+  background-image: none;
+  color: oklch(0.97 0.005 285);
+  border: 1px solid oklch(1 0 0 / 0.14);
+  backdrop-filter: blur(8px);
+}
+.gradient .brand-button:hover {
+  filter: none;
+  background-color: oklch(0 0 0 / 0.55);
+  border-color: oklch(1 0 0 / 0.22);
 }

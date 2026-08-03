@@ -36,7 +36,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex min-h-svh">
       <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border p-4">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-admin text-admin-foreground">
+          <div className="brand-admin-icon flex size-7 items-center justify-center rounded-lg">
             <ShieldCheck className="size-4" />
           </div>
           <div>

@@ -49,7 +49,7 @@ export function DashboardNav() {
             className={cn(
               "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               active
-                ? "bg-secondary text-secondary-foreground"
+                ? "brand-active"
                 : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
             )}
           >
