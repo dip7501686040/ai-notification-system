@@ -210,6 +210,13 @@ services:
   # profile (add COMPOSE_PROFILES=stripe to .env) so the stack still
   # comes up cleanly with no Stripe credentials at all.
   #
+  # Targets host.docker.internal rather than the api-gateway service name
+  # because api-gateway's host port 8000 is reachable there either way --
+  # whether api-gateway is this compose file's own container or running
+  # natively on the host (see scripts/dev.sh, the local-dev path where
+  # only infra runs in Docker). No depends_on for the same reason: this
+  # container doesn't require api-gateway to be a compose-managed service.
+  #
   # One-time setup: after this container is up, `docker compose logs
   # stripe-cli` prints "Your webhook signing secret is whsec_...".
   # Stripe's CLI keeps this secret stable across restarts for a given
@@ -218,11 +225,10 @@ services:
   stripe-cli:
     image: stripe/stripe-cli:latest
     restart: unless-stopped
-    command: listen --api-key ${STRIPE_SECRET_KEY:-} --forward-to api-gateway:8000/webhooks/stripe
+    command: listen --api-key ${STRIPE_SECRET_KEY:-} --forward-to host.docker.internal:8000/webhooks/stripe
     profiles: ["stripe"]
-    depends_on:
-      api-gateway:
-        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [ai-notification]
 
   identity-service:

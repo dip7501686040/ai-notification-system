@@ -8,7 +8,7 @@
   "packageManager": "pnpm@10.16.0",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "bash scripts/dev.sh",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
