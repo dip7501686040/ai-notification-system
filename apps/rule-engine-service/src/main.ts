@@ -38,9 +38,6 @@ async function bootstrap() {
   logger.info(
     `rule-engine-service gRPC rule server listening on port ${env.RULE_ENGINE_GRPC_PORT}`,
   );
-
-  await app.listen(env.PORT);
-  logger.info(`rule-engine-service listening on port ${env.PORT}`);
 }
 
 bootstrap();

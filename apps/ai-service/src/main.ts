@@ -36,9 +36,6 @@ async function bootstrap() {
   await app.startAllMicroservices();
   logger.info(`ai-service gRPC health server listening on port ${env.GRPC_PORT}`);
   logger.info(`ai-service gRPC AI server listening on port ${env.AI_GRPC_PORT}`);
-
-  await app.listen(env.PORT);
-  logger.info(`ai-service listening on port ${env.PORT}`);
 }
 
 bootstrap();

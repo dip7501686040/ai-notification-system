@@ -1,7 +1,6 @@
 import { loadEnv, z } from "@ai-notification/config";
 
 const schema = z.object({
-  PORT: z.coerce.number().default(8009),
   GRPC_PORT: z.coerce.number().default(50060),
   ANALYTICS_GRPC_PORT: z.coerce.number().default(50160),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

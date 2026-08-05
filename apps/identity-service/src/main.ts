@@ -36,9 +36,6 @@ async function bootstrap() {
   await app.startAllMicroservices();
   logger.info(`identity-service gRPC health server listening on port ${env.GRPC_PORT}`);
   logger.info(`identity-service gRPC auth server listening on port ${env.AUTH_GRPC_PORT}`);
-
-  await app.listen(env.PORT);
-  logger.info(`identity-service listening on port ${env.PORT}`);
 }
 
 bootstrap();

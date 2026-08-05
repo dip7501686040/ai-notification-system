@@ -240,7 +240,6 @@ services:
         APP_DIR: identity-service
     environment:
       <<: *nest-env
-      PORT: "8001"
       AUTH_GRPC_PORT: "50152"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/identity_db
       JWT_SECRET: dev-only-insecure-jwt-secret-change-in-production
@@ -263,7 +262,6 @@ services:
         APP_DIR: tenant-service
     environment:
       <<: *nest-env
-      PORT: "8002"
       TENANT_GRPC_PORT: "50153"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tenant_db
       IDENTITY_AUTH_GRPC_ADDRESS: identity-service:50152
@@ -289,7 +287,6 @@ services:
         APP_DIR: event-service
     environment:
       <<: *nest-env
-      PORT: "8003"
       EVENT_GRPC_PORT: "50154"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/event_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -347,7 +344,6 @@ services:
         APP_DIR: ai-service
     environment:
       <<: *nest-env
-      PORT: "8004"
       AI_GRPC_PORT: "50155"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -376,7 +372,6 @@ services:
         APP_DIR: rule-engine-service
     environment:
       <<: *nest-env
-      PORT: "8005"
       RULE_ENGINE_GRPC_PORT: "50156"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/rule_engine_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -398,7 +393,6 @@ services:
         APP_DIR: notification-service
     environment:
       <<: *nest-env
-      PORT: "8006"
       NOTIFICATION_GRPC_PORT: "50157"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/notification_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -424,7 +418,6 @@ services:
         APP_DIR: channel-service
     environment:
       <<: *nest-env
-      PORT: "8007"
       CHANNEL_GRPC_PORT: "50158"
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -442,7 +435,6 @@ services:
         APP_DIR: template-service
     environment:
       <<: *nest-env
-      PORT: "8008"
       TEMPLATE_GRPC_PORT: "50159"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/template_db
       TENANT_GRPC_ADDRESS: tenant-service:50153
@@ -461,7 +453,6 @@ services:
         APP_DIR: analytics-service
     environment:
       <<: *nest-env
-      PORT: "8009"
       ANALYTICS_GRPC_PORT: "50160"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/analytics_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -484,7 +475,6 @@ services:
         APP_DIR: audit-service
     environment:
       <<: *nest-env
-      PORT: "8010"
       AUDIT_GRPC_PORT: "50161"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/audit_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672

@@ -38,9 +38,6 @@ async function bootstrap() {
   logger.info(
     `notification-service gRPC notification server listening on port ${env.NOTIFICATION_GRPC_PORT}`,
   );
-
-  await app.listen(env.PORT);
-  logger.info(`notification-service listening on port ${env.PORT}`);
 }
 
 bootstrap();

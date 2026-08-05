@@ -38,9 +38,6 @@ async function bootstrap() {
   logger.info(
     `analytics-service gRPC analytics server listening on port ${env.ANALYTICS_GRPC_PORT}`,
   );
-
-  await app.listen(env.PORT);
-  logger.info(`analytics-service listening on port ${env.PORT}`);
 }
 
 bootstrap();
