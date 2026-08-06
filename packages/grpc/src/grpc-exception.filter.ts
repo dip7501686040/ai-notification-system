@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, HttpException, type RpcExceptionFilter } from "@n
 import { RpcException } from "@nestjs/microservices";
 import { status as grpcStatus } from "@grpc/grpc-js";
 import { throwError, type Observable } from "rxjs";
+import type { Logger } from "@ai-notification/logger";
 
 interface GrpcErrorPayload {
   code: number;
@@ -41,10 +42,19 @@ function messageFrom(exception: HttpException): string {
 // degrades every response to UNKNOWN/500.
 @Catch()
 export class GrpcExceptionFilter implements RpcExceptionFilter<unknown> {
+  // Sole place every gRPC service's unhandled exceptions pass through --
+  // logging here (rather than at each throw site) is what gets them into
+  // Loki, since this filter previously only converted exceptions to gRPC
+  // status payloads and dropped everything else on the floor.
+  constructor(private readonly logger: Logger) {}
+
   catch(exception: unknown, _host: ArgumentsHost): Observable<GrpcErrorPayload> {
     if (exception instanceof HttpException) {
-      const code = HTTP_TO_GRPC_STATUS[exception.getStatus()] ?? grpcStatus.INTERNAL;
-      return throwError(() => ({ code, message: messageFrom(exception) }));
+      const status = exception.getStatus();
+      const code = HTTP_TO_GRPC_STATUS[status] ?? grpcStatus.INTERNAL;
+      const message = messageFrom(exception);
+      this.log(status >= 500 ? "error" : "warn", exception, message);
+      return throwError(() => ({ code, message }));
     }
 
     if (exception instanceof RpcException) {
@@ -53,10 +63,16 @@ export class GrpcExceptionFilter implements RpcExceptionFilter<unknown> {
         typeof error === "string"
           ? { code: grpcStatus.INTERNAL, message: error }
           : (error as GrpcErrorPayload);
+      this.log("error", exception, payload.message);
       return throwError(() => payload);
     }
 
     const message = exception instanceof Error ? exception.message : "Internal error";
+    this.log("error", exception, message);
     return throwError(() => ({ code: grpcStatus.INTERNAL, message }));
+  }
+
+  private log(level: "error" | "warn", exception: unknown, message: string): void {
+    this.logger[level]({ err: exception }, message);
   }
 }

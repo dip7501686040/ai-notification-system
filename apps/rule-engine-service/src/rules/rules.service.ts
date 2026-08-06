@@ -2,12 +2,14 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import { checkMembershipViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
 import type { Prisma, Rule } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env } from "../env";
 import type { CreateRuleDto } from "./dto/create-rule.dto";
 import type { UpdateRuleDto } from "./dto/update-rule.dto";
 
+const logger = createLogger("rule-engine-service");
 const RULE_SEARCHABLE_FIELDS = ["name", "eventType"];
 const EXCHANGE = "platform";
 const AUDIT_CREATED_ROUTING_KEY = "audit.created";
@@ -95,14 +97,7 @@ export class RulesService extends BaseCrudService<
     const rule = await this.getRuleOrThrow(ruleId);
     await this.assertMembership(rule.tenantId, requesterId, true, MANAGE_ROLES);
     await super.delete({ id: ruleId });
-    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
-      action: "rule.deleted",
-      tenantId: rule.tenantId,
-      actorId: requesterId,
-      targetType: "rule",
-      targetId: rule.id,
-      metadata: {},
-    });
+    await this.publishAudit("rule.deleted", rule, requesterId);
   }
 
   // Used by RuleConsumerService, not exposed over gRPC -- no requester to
@@ -135,20 +130,27 @@ export class RulesService extends BaseCrudService<
 
   // FR-9 audit logging (Audit Service): fire-and-forget, mirrors the
   // shape AuditConsumerService expects for the generic `audit.created`
-  // event -- rule.created/updated write the same metadata shape.
+  // event -- rule.created/updated/deleted write the same metadata shape.
+  // Guarded: the rule mutation itself is already committed by the time
+  // this runs, so a RabbitMQ blip should cost an audit entry, not fail
+  // the caller's create/update/delete.
   private async publishAudit(
-    action: "rule.created" | "rule.updated",
+    action: "rule.created" | "rule.updated" | "rule.deleted",
     rule: Rule,
     actorId: string,
   ): Promise<void> {
-    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
-      action,
-      tenantId: rule.tenantId,
-      actorId,
-      targetType: "rule",
-      targetId: rule.id,
-      metadata: { name: rule.name, eventType: rule.eventType },
-    });
+    try {
+      await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+        action,
+        tenantId: rule.tenantId,
+        actorId,
+        targetType: "rule",
+        targetId: rule.id,
+        metadata: { name: rule.name, eventType: rule.eventType },
+      });
+    } catch (err) {
+      logger.error({ err, action, ruleId: rule.id }, "Failed to publish audit event");
+    }
   }
 
   private async getRuleOrThrow(ruleId: string): Promise<Rule> {

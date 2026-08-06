@@ -1,0 +1,7 @@
+{
+  // Auto-attach the JS debugger to any Node process spawned in the
+  // integrated terminal (nest start --watch, next dev, prisma generate,
+  // turbo's own process, etc). Run `pnpm dev` in this terminal and
+  // breakpoints in any .ts file work immediately -- no launch.json needed.
+  "debug.javascript.autoAttachFilter": "always"
+}

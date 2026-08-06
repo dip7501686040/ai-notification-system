@@ -965,6 +965,9 @@ importers:
 
   packages/grpc:
     dependencies:
+      '@ai-notification/logger':
+        specifier: workspace:*
+        version: link:../logger
       '@grpc/grpc-js':
         specifier: ^1.12.2
         version: 1.14.4

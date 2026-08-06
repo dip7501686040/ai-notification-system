@@ -2,8 +2,8 @@
 # Seeds a realistic, client-demo-ready dataset against a running local
 # stack (docker compose up), covering every service: two tenants (to
 # show multi-tenancy + RBAC), templates, rules, events, notifications
-# (success/failure/retry), an API key, and AI analysis via the local
-# Ollama model. Safe to read top-to-bottom as a script-form walkthrough
+# (success/failure/retry), an API key, and AI analysis via the OpenAI
+# API. Safe to read top-to-bottom as a script-form walkthrough
 # of the platform's write paths -- see docs/demo-walkthrough.md for the
 # narrative version.
 #
@@ -61,9 +61,9 @@ curl -s -X POST "$API/rules" -H "Content-Type: application/json" -H "Authorizati
 curl -s -X POST "$API/rules" -H "Content-Type: application/json" -H "Authorization: Bearer $TOK1" \
   -d "{\"tenantId\":\"$TENANT1\",\"name\":\"Catch-all Dashboard Feed\",\"eventType\":\"*\",\"conditions\":{},\"actions\":[{\"channel\":\"dashboard\",\"target\":\"$OWNER1_EMAIL\"}]}" > /dev/null
 
-echo "== Tenant 1: AI config -> local Ollama (no API key needed) =="
+echo "== Tenant 1: AI config -> OpenAI (Ollama not available locally; OPENAI_API_KEY already set in root .env) =="
 curl -s -X PUT "$API/ai-config" -H "Content-Type: application/json" -H "Authorization: Bearer $TOK1" \
-  -d "{\"tenantId\":\"$TENANT1\",\"provider\":\"ollama\",\"model\":\"qwen2.5:0.5b\"}" > /dev/null
+  -d "{\"tenantId\":\"$TENANT1\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}" > /dev/null
 
 echo "== Tenant 1: API key =="
 curl -s -X POST "$API/apikeys" -H "Content-Type: application/json" -H "Authorization: Bearer $TOK1" \
@@ -96,4 +96,4 @@ echo ""
 echo "Done. Log in at the web app as:"
 echo "  Tenant 1 owner: $OWNER1_EMAIL / $PASSWORD  (Acme Support -- owner)"
 echo "  Tenant 2 owner: $OWNER2_EMAIL / $PASSWORD  (Globex Freight Co -- owner; $OWNER1_EMAIL is a member here)"
-echo "Give analytics-service ~20-30s to run AI analysis via Ollama before checking the AI tab."
+echo "Give ai-service ~20-30s to run AI analysis via OpenAI before checking the AI tab."

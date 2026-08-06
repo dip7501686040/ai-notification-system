@@ -106,14 +106,21 @@ export class NotificationsService extends BaseCrudService<
         status: "pending",
       });
 
-      await this.rabbitmq.publish(EXCHANGE, "notification.created", {
-        notificationId: notification.id,
-        tenantId,
-        eventId,
-        ruleId,
-        channel: notification.channel,
-        target: notification.target,
-      });
+      try {
+        await this.rabbitmq.publish(EXCHANGE, "notification.created", {
+          notificationId: notification.id,
+          tenantId,
+          eventId,
+          ruleId,
+          channel: notification.channel,
+          target: notification.target,
+        });
+      } catch (err) {
+        this.logger.error(
+          { err, notificationId: notification.id },
+          "Failed to publish notification.created",
+        );
+      }
 
       await this.attemptDispatch(notification);
     }
@@ -127,13 +134,24 @@ export class NotificationsService extends BaseCrudService<
     // listening, the row still exists here as `readStatus: "unread"`,
     // fetchable later over REST.
     if (notification.channel === DASHBOARD_CHANNEL) {
-      await this.rabbitmq.publish(EXCHANGE, "notification.dashboard.push", {
-        notificationId: notification.id,
-        tenantId: notification.tenantId,
-        userId: notification.target,
-        payload: notification.payload,
-        createdAt: notification.createdAt,
-      });
+      try {
+        await this.rabbitmq.publish(EXCHANGE, "notification.dashboard.push", {
+          notificationId: notification.id,
+          tenantId: notification.tenantId,
+          userId: notification.target,
+          payload: notification.payload,
+          createdAt: notification.createdAt,
+        });
+      } catch (err) {
+        // Matches the best-effort semantics this branch already documents
+        // above: if nobody's listening the row still counts as "sent" and
+        // is fetchable over REST, so a broker blip shouldn't be treated
+        // any differently than nobody being connected.
+        this.logger.error(
+          { err, notificationId: notification.id },
+          "Failed to publish notification.dashboard.push",
+        );
+      }
       return super.update({ id: notification.id }, { status: "sent", sentAt: new Date() });
     }
 
@@ -149,12 +167,21 @@ export class NotificationsService extends BaseCrudService<
         { id: notification.id },
         { status: "sent", sentAt: new Date() },
       );
-      await this.rabbitmq.publish(EXCHANGE, "notification.sent", {
-        notificationId: sent.id,
-        tenantId: sent.tenantId,
-        channel: sent.channel,
-        target: sent.target,
-      });
+      try {
+        await this.rabbitmq.publish(EXCHANGE, "notification.sent", {
+          notificationId: sent.id,
+          tenantId: sent.tenantId,
+          channel: sent.channel,
+          target: sent.target,
+        });
+      } catch (err) {
+        // The channel dispatch already succeeded and the row is already
+        // "sent" -- a publish failure here is a lost analytics/audit
+        // event, not a failed send, so it must not throw back to the
+        // caller (which would otherwise nack the whole matched-rule
+        // message, see RabbitMQService.consume).
+        this.logger.error({ err, notificationId: sent.id }, "Failed to publish notification.sent");
+      }
       return sent;
     }
 
@@ -164,13 +191,20 @@ export class NotificationsService extends BaseCrudService<
         { id: notification.id },
         { status: "dead_letter", attempts, lastError: result.error },
       );
-      await this.rabbitmq.publish(EXCHANGE, "notification.dead", {
-        notificationId: deadLettered.id,
-        tenantId: deadLettered.tenantId,
-        channel: deadLettered.channel,
-        target: deadLettered.target,
-        error: result.error,
-      });
+      try {
+        await this.rabbitmq.publish(EXCHANGE, "notification.dead", {
+          notificationId: deadLettered.id,
+          tenantId: deadLettered.tenantId,
+          channel: deadLettered.channel,
+          target: deadLettered.target,
+          error: result.error,
+        });
+      } catch (err) {
+        this.logger.error(
+          { err, notificationId: deadLettered.id },
+          "Failed to publish notification.dead",
+        );
+      }
       return deadLettered;
     }
 
@@ -184,14 +218,21 @@ export class NotificationsService extends BaseCrudService<
         nextAttemptAt: new Date(Date.now() + delay),
       },
     );
-    await this.rabbitmq.publish(EXCHANGE, "notification.retry", {
-      notificationId: retrying.id,
-      tenantId: retrying.tenantId,
-      channel: retrying.channel,
-      target: retrying.target,
-      attempts,
-      nextAttemptAt: retrying.nextAttemptAt,
-    });
+    try {
+      await this.rabbitmq.publish(EXCHANGE, "notification.retry", {
+        notificationId: retrying.id,
+        tenantId: retrying.tenantId,
+        channel: retrying.channel,
+        target: retrying.target,
+        attempts,
+        nextAttemptAt: retrying.nextAttemptAt,
+      });
+    } catch (err) {
+      this.logger.error(
+        { err, notificationId: retrying.id },
+        "Failed to publish notification.retry",
+      );
+    }
     return retrying;
   }
 

@@ -79,15 +79,22 @@ export class AuthService {
 
     // FR-9 audit logging (Audit Service): fire-and-forget, generic
     // `audit.created` event -- identity-service has no other RabbitMQ
-    // producer/consumer, this is its first use of the bus.
-    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
-      action: "user.login",
-      tenantId: null,
-      actorId: user.id,
-      targetType: "user",
-      targetId: user.id,
-      metadata: { email: user.email },
-    });
+    // producer/consumer, this is its first use of the bus. Was previously
+    // awaited unguarded despite the "fire-and-forget" intent above --
+    // a broker blip failed login itself even though the password was
+    // already verified correct.
+    try {
+      await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+        action: "user.login",
+        tenantId: null,
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        metadata: { email: user.email },
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.id }, "Failed to publish audit event");
+    }
 
     return { user: toSafeUser(user), accessToken: this.issueToken(user) };
   }

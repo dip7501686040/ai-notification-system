@@ -17,7 +17,7 @@ async function bootstrap() {
   const logger = createLogger("event-service");
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
-  app.useGlobalFilters(new GrpcExceptionFilter());
+  app.useGlobalFilters(new GrpcExceptionFilter(logger));
 
   app.connectMicroservice<MicroserviceOptions>(grpcHealthMicroserviceOptions(env.GRPC_PORT));
   app.connectMicroservice<MicroserviceOptions>(
@@ -33,6 +33,7 @@ async function bootstrap() {
     { inheritAppConfig: true },
   );
 
+  await app.init();
   await app.startAllMicroservices();
   logger.info(`event-service gRPC health server listening on port ${env.GRPC_PORT}`);
   logger.info(`event-service gRPC event server listening on port ${env.EVENT_GRPC_PORT}`);

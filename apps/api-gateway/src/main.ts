@@ -8,6 +8,7 @@ import { AppModule } from "./app.module";
 import { createLogger } from "@ai-notification/logger";
 import { RedisIoAdapter } from "./notifications/redis-io.adapter";
 import { TenantMetricsInterceptor } from "./observability/tenant-metrics.interceptor";
+import { HttpLoggingExceptionFilter } from "./observability/http-exception.filter";
 import { env } from "./env";
 
 async function bootstrap() {
@@ -20,6 +21,7 @@ async function bootstrap() {
   // Bearer tokens, not cookies -- credentials stays false.
   app.enableCors({ origin: env.FRONTEND_URL });
 
+  app.useGlobalFilters(new HttpLoggingExceptionFilter(logger));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalInterceptors(new TenantMetricsInterceptor());
 

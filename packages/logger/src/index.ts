@@ -15,6 +15,10 @@ export function createLogger(service: string, options: CreateLoggerOptions = {})
     level,
     base: { service },
     timestamp: pino.stdTimeFunctions.isoTime,
+    // Without this, `logger.error({ err }, ...)` serializes Error objects
+    // to "{}" -- message/stack are non-enumerable own properties that
+    // JSON.stringify skips by default.
+    serializers: { err: pino.stdSerializers.err },
     transport: pretty
       ? {
           target: "pino-pretty",

@@ -83,20 +83,31 @@ export class AiAnalysisService extends BaseCrudService<
         status: "completed",
       });
 
-      await this.rabbitmq.publish(EXCHANGE, AI_COMPLETED_ROUTING_KEY, {
-        analysisId: analysis.id,
-        tenantId: analysis.tenantId,
-        eventId: analysis.eventId,
-        provider: analysis.provider,
-        model: analysis.model,
-        summary: analysis.summary,
-        category: analysis.category,
-        severity: analysis.severity,
-        businessImpact: analysis.businessImpact,
-        recommendation: analysis.recommendation,
-        isDuplicate: analysis.isDuplicate,
-        duplicateOfEventId: analysis.duplicateOfEventId,
-      });
+      // Guarded separately from the analysis pipeline above: the
+      // "completed" row is already committed at this point, so a publish
+      // failure here must not fall into the outer catch below, which
+      // would record a second, contradictory "failed" row for an
+      // analysis that actually succeeded.
+      try {
+        await this.rabbitmq.publish(EXCHANGE, AI_COMPLETED_ROUTING_KEY, {
+          analysisId: analysis.id,
+          tenantId: analysis.tenantId,
+          eventId: analysis.eventId,
+          provider: analysis.provider,
+          model: analysis.model,
+          summary: analysis.summary,
+          category: analysis.category,
+          severity: analysis.severity,
+          businessImpact: analysis.businessImpact,
+          recommendation: analysis.recommendation,
+          isDuplicate: analysis.isDuplicate,
+          duplicateOfEventId: analysis.duplicateOfEventId,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to publish event.ai.completed for analysis ${analysis.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.warn(

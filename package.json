@@ -9,6 +9,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bash scripts/dev.sh",
+    "dev:full": "bash scripts/dev-full.sh",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

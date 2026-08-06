@@ -72,22 +72,35 @@ export class RuleConsumerService implements OnModuleInit {
         },
       });
 
-      await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
-        eventId: message.eventId,
-        tenantId: rule.tenantId,
-        ruleId: rule.id,
-        ruleName: rule.name,
-        actions: rule.actions,
-        type: message.type,
-        source: message.source,
-        payload: message.payload,
-        matchedAt: new Date().toISOString(),
-      });
+      // Guarded: the RuleMatch row above is already committed, and this
+      // runs in a loop over every matching rule for the event -- letting
+      // a publish failure throw would nack the whole message (no
+      // dead-letter/requeue, see RabbitMQService.consume), silently
+      // dropping every other still-unprocessed rule match for this event
+      // too, not just this one.
+      try {
+        await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
+          eventId: message.eventId,
+          tenantId: rule.tenantId,
+          ruleId: rule.id,
+          ruleName: rule.name,
+          actions: rule.actions,
+          type: message.type,
+          source: message.source,
+          payload: message.payload,
+          matchedAt: new Date().toISOString(),
+        });
 
-      this.logger.info(
-        { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
-        `Rule "${rule.name}" matched event`,
-      );
+        this.logger.info(
+          { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
+          `Rule "${rule.name}" matched event`,
+        );
+      } catch (err) {
+        this.logger.error(
+          { err, tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
+          "Failed to publish rule match",
+        );
+      }
     }
   }
 }

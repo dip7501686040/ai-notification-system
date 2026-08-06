@@ -2,10 +2,13 @@ import * as crypto from "node:crypto";
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
 import type { ApiKey, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { TenantRole } from "./dto/add-member.dto";
 import type { CreateApiKeyDto } from "./dto/create-api-key.dto";
+
+const logger = createLogger("tenant-service");
 
 const MANAGE_ROLES: TenantRole[] = ["owner", "admin"];
 const API_KEY_SEARCHABLE_FIELDS = ["name", "keyPrefix"];
@@ -131,19 +134,28 @@ export class ApiKeysService extends BaseCrudService<
     };
   }
 
+  // Best-effort: the key itself is already committed to Postgres by the
+  // time this runs (createKey/rotate/revoke all persist first), so a
+  // RabbitMQ hiccup here should cost an audit-log entry, not the caller's
+  // rawKey -- previously this was awaited unguarded, so a broker blip made
+  // API key creation 500 even though the key had already been created.
   private async publishAudit(
     action: "apikey.created" | "apikey.rotated" | "apikey.revoked",
     apiKey: ApiKey,
     actorId: string,
   ): Promise<void> {
-    await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
-      action,
-      tenantId: apiKey.tenantId,
-      actorId,
-      targetType: "apikey",
-      targetId: apiKey.id,
-      metadata: { name: apiKey.name, keyPrefix: apiKey.keyPrefix },
-    });
+    try {
+      await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+        action,
+        tenantId: apiKey.tenantId,
+        actorId,
+        targetType: "apikey",
+        targetId: apiKey.id,
+        metadata: { name: apiKey.name, keyPrefix: apiKey.keyPrefix },
+      });
+    } catch (err) {
+      logger.error({ err, action, apiKeyId: apiKey.id }, "Failed to publish audit event");
+    }
   }
 
   private async getApiKeyOrThrow(apiKeyId: string): Promise<ApiKey> {
