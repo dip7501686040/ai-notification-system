@@ -14,12 +14,15 @@ export interface AnalysisInput {
 export type Severity = "low" | "medium" | "high" | "critical";
 export type BusinessImpact = "low" | "medium" | "high";
 
+export type RecommendedChannel = "email" | "webhook" | "dashboard";
+
 export interface AnalysisOutput {
   summary: string;
   category: string;
   severity: Severity;
   businessImpact: BusinessImpact;
   recommendation: string;
+  recommendedChannel: RecommendedChannel;
   isDuplicate: boolean;
   duplicateOfEventId: string | null;
 }
@@ -51,11 +54,21 @@ export function buildAnalysisPrompt(input: AnalysisInput): string {
     "You are an incident-analysis assistant for an operations/alerting platform.",
     "Analyze the following event and produce a structured assessment: a one-sentence",
     "summary, a short category label, a severity rating, the business impact, and a",
-    "concrete recommended action. Also decide whether this event is a duplicate of an",
+    "concrete recommended action -- phrase the recommendation as next steps the",
+    "recipient can act on (what to check, who to contact, what to do next), not just a",
+    "restatement of the problem. Also decide whether this event is a duplicate of an",
     "already-recorded incident, using the recently recorded similar events below as",
     "context -- if this looks like the same underlying incident as one of them, set",
     "isDuplicate to true and duplicateOfEventId to that event's id; otherwise set",
     "isDuplicate to false and duplicateOfEventId to null.",
+    "",
+    "Also recommend which notification channel this event should be delivered on.",
+    'Choose exactly one of: "email", "webhook", "dashboard" -- these are the only',
+    'channels this platform can currently deliver to. Prefer "dashboard" for routine or',
+    'low-severity events, "email" for events a human should read and act on but that',
+    'aren\'t time-critical, and "webhook" for events that should trigger an automated',
+    "downstream system. This is advisory only -- the actual delivery channel is",
+    "determined separately by the matched rule's configuration.",
     "",
     `Event type: ${input.eventType}`,
     `Event source: ${input.eventSource ?? "(unknown)"}`,

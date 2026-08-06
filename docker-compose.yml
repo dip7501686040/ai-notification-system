@@ -397,7 +397,6 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/notification_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       TENANT_GRPC_ADDRESS: tenant-service:50153
-      CHANNEL_GRPC_ADDRESS: channel-service:50158
       TEMPLATE_GRPC_ADDRESS: template-service:50159
     depends_on:
       otel-collector:
@@ -407,8 +406,9 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # Stateless connector layer -- no database, no RabbitMQ dependency. Its
-  # only caller is notification-service, over gRPC.
+  # Async dispatch worker -- no database, consumes notification.created off
+  # RabbitMQ (published by notification-service) and reports the outcome
+  # back the same way (notification.sent/retry/dead/dashboard.push).
   channel-service:
     <<: *nest-defaults
     build:
@@ -418,13 +418,18 @@ services:
         APP_DIR: channel-service
     environment:
       <<: *nest-env
-      CHANNEL_GRPC_PORT: "50158"
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
+    depends_on:
+      otel-collector:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   template-service:
     <<: *nest-defaults

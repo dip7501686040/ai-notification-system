@@ -21,6 +21,7 @@ model EventAnalysis {
   severity           String
   businessImpact     String
   recommendation     String
+  recommendedChannel String   @default("")
   isDuplicate        Boolean  @default(false)
   duplicateOfEventId String?
   status             String

@@ -23,6 +23,7 @@ interface EventAnalysisMessage {
   error: string;
   created_at: string;
   updated_at: string;
+  recommended_channel: string;
 }
 
 interface ListQueryMessage {
@@ -93,6 +94,7 @@ function toEventAnalysisMessage(analysis: EventAnalysis): EventAnalysisMessage {
     error: analysis.error ?? "",
     created_at: analysis.createdAt.toISOString(),
     updated_at: analysis.updatedAt.toISOString(),
+    recommended_channel: analysis.recommendedChannel,
   };
 }
 

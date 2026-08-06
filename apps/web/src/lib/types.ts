@@ -161,6 +161,7 @@ export interface EventAnalysis {
   severity: string;
   businessImpact: string;
   recommendation: string;
+  recommendedChannel: string;
   isDuplicate: boolean;
   duplicateOfEventId: string;
   status: string;

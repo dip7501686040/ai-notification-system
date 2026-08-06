@@ -14,6 +14,7 @@ export interface EventAnalysisResult {
   severity: string;
   businessImpact: string;
   recommendation: string;
+  recommendedChannel: string;
   isDuplicate: boolean;
   duplicateOfEventId: string;
   status: string;
@@ -57,6 +58,7 @@ interface EventAnalysisWireMessage {
   severity: string;
   business_impact: string;
   recommendation: string;
+  recommended_channel: string;
   is_duplicate: boolean;
   duplicate_of_event_id: string;
   status: string;
@@ -106,6 +108,7 @@ function toEventAnalysisResult(wire: EventAnalysisWireMessage): EventAnalysisRes
     severity: wire.severity,
     businessImpact: wire.business_impact,
     recommendation: wire.recommendation,
+    recommendedChannel: wire.recommended_channel,
     isDuplicate: wire.is_duplicate,
     duplicateOfEventId: wire.duplicate_of_event_id,
     status: wire.status,

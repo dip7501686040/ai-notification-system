@@ -28,7 +28,12 @@ export class RetrySchedulerService implements OnModuleInit {
     try {
       const due = await this.notificationsService.findDueForRetry();
       for (const notification of due) {
-        await this.notificationsService.attemptDispatch(notification);
+        // Claim it first: moving off "retrying" is what stops the next
+        // poll tick from picking this same row up again before channel-
+        // service's async outcome comes back (see markDispatching's own
+        // comment).
+        const claimed = await this.notificationsService.markDispatching(notification);
+        await this.notificationsService.requestDispatch(claimed);
       }
     } catch (error) {
       this.logger.error(`Retry poll failed: ${error instanceof Error ? error.message : error}`);

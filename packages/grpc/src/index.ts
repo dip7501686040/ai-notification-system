@@ -8,7 +8,6 @@ export * from "./event-client";
 export * from "./rule-client";
 export * from "./notification-client";
 export * from "./ai-client";
-export * from "./channel-client";
 export * from "./template-client";
 export * from "./analytics-client";
 export * from "./audit-client";

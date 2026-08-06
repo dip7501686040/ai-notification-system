@@ -20,6 +20,7 @@
     "zod": "^3.24.0",
     "@ai-notification/telemetry": "workspace:*",
     "@ai-notification/grpc": "workspace:*",
+    "@ai-notification/rabbitmq": "workspace:*",
     "@nestjs/microservices": "^10.4.15",
     "nodemailer": "^6.9.16"
   },

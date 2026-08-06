@@ -14,6 +14,7 @@ const AnalysisSchema = z.object({
   severity: z.enum(["low", "medium", "high", "critical"]),
   businessImpact: z.enum(["low", "medium", "high"]),
   recommendation: z.string(),
+  recommendedChannel: z.enum(["email", "webhook", "dashboard"]),
   isDuplicate: z.boolean(),
   duplicateOfEventId: z.string().nullable(),
 });

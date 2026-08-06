@@ -9,6 +9,7 @@ import { evaluate, type Condition } from "./rule-evaluator";
 const EVENTS_EXCHANGE = "platform";
 const EVENT_CREATED_ROUTING_KEY = "event.created";
 const RULE_MATCHED_ROUTING_KEY = "event.rule.matched";
+const AUDIT_CREATED_ROUTING_KEY = "audit.created";
 const QUEUE_NAME = "rule-engine.event.created";
 
 interface EventCreatedMessage {
@@ -20,9 +21,20 @@ interface EventCreatedMessage {
   createdAt: string;
 }
 
+interface RuleMatchEntry {
+  ruleId: string;
+  ruleName: string;
+  actions: unknown;
+}
+
 // The first RabbitMQ *consumer* in this codebase (everything before this
 // only published). Subscribes to every event-service publishes and
-// evaluates each tenant's active rules against it.
+// evaluates each tenant's active rules against it. Pipeline stage 1 of
+// event.created -> event.rule.matched -> event.ai.completed ->
+// notification.created: one event.rule.matched is published per event
+// (carrying every matching rule), not one per rule, so ai-service (the
+// next stage) runs exactly one analysis per event instead of one per
+// matching rule.
 @Injectable()
 export class RuleConsumerService implements OnModuleInit {
   private readonly logger = createLogger("rule-engine-service");
@@ -40,6 +52,19 @@ export class RuleConsumerService implements OnModuleInit {
   }
 
   private async handleEvent(message: EventCreatedMessage): Promise<void> {
+    try {
+      await this.evaluateAndPublish(message);
+    } catch (err) {
+      this.logger.error(
+        { err, tenantId: message.tenantId, eventId: message.eventId },
+        "Rule evaluation failed for event",
+      );
+      await this.publishAudit(message, err);
+      throw err;
+    }
+  }
+
+  private async evaluateAndPublish(message: EventCreatedMessage): Promise<void> {
     const rules = await this.rulesService.findActiveForEvaluation(message.tenantId, message.type);
     if (rules.length === 0) {
       return;
@@ -52,14 +77,16 @@ export class RuleConsumerService implements OnModuleInit {
       ...message.payload,
     };
 
+    const matches: RuleMatchEntry[] = [];
+
     for (const rule of rules) {
       const conditions = rule.conditions as Record<string, unknown> | null;
-      const matches =
+      const isMatch =
         !conditions || Object.keys(conditions).length === 0
           ? true
           : evaluate(conditions as unknown as Condition, context);
 
-      if (!matches) {
+      if (!isMatch) {
         continue;
       }
 
@@ -72,35 +99,48 @@ export class RuleConsumerService implements OnModuleInit {
         },
       });
 
-      // Guarded: the RuleMatch row above is already committed, and this
-      // runs in a loop over every matching rule for the event -- letting
-      // a publish failure throw would nack the whole message (no
-      // dead-letter/requeue, see RabbitMQService.consume), silently
-      // dropping every other still-unprocessed rule match for this event
-      // too, not just this one.
-      try {
-        await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
-          eventId: message.eventId,
-          tenantId: rule.tenantId,
-          ruleId: rule.id,
-          ruleName: rule.name,
-          actions: rule.actions,
-          type: message.type,
-          source: message.source,
-          payload: message.payload,
-          matchedAt: new Date().toISOString(),
-        });
+      matches.push({ ruleId: rule.id, ruleName: rule.name, actions: rule.actions });
 
-        this.logger.info(
-          { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
-          `Rule "${rule.name}" matched event`,
-        );
-      } catch (err) {
-        this.logger.error(
-          { err, tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
-          "Failed to publish rule match",
-        );
-      }
+      this.logger.info(
+        { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
+        `Rule "${rule.name}" matched event`,
+      );
+    }
+
+    if (matches.length === 0) {
+      return;
+    }
+
+    await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
+      eventId: message.eventId,
+      tenantId: message.tenantId,
+      type: message.type,
+      source: message.source,
+      payload: message.payload,
+      matchedAt: new Date().toISOString(),
+      matches,
+    });
+  }
+
+  private async publishAudit(message: EventCreatedMessage, err: unknown): Promise<void> {
+    try {
+      await this.rabbitmq.publish(EVENTS_EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+        tenantId: message.tenantId,
+        actorId: null,
+        action: "event.rule.failed",
+        targetType: "event",
+        targetId: message.eventId,
+        metadata: {
+          type: message.type,
+          stage: "rule",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    } catch (auditErr) {
+      this.logger.error(
+        { err: auditErr, eventId: message.eventId },
+        "Failed to publish audit.created for rule evaluation failure",
+      );
     }
   }
 }

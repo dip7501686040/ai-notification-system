@@ -1,15 +1,11 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
-import {
-  checkMembershipViaGrpc,
-  dispatchViaGrpc,
-  renderTemplateViaGrpc,
-} from "@ai-notification/grpc";
+import { checkMembershipViaGrpc, renderTemplateViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import { createLogger } from "@ai-notification/logger";
 import type { Notification, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
-import { env, retryBackoffMs } from "../env";
+import { env } from "../env";
 
 const NOTIFICATION_SEARCHABLE_FIELDS = ["channel", "target", "status"];
 const EXCHANGE = "platform";
@@ -28,6 +24,57 @@ function isValidAction(action: unknown): action is RuleAction {
     typeof (action as RuleAction).channel === "string" &&
     typeof (action as RuleAction).target === "string"
   );
+}
+
+// ai-service's event.ai.completed payload, as much of it as
+// notification-service needs to merge into each Notification's content.
+export interface AiAnalysisSummary {
+  summary: string;
+  category: string;
+  severity: string;
+  businessImpact: string;
+  recommendation: string;
+  recommendedChannel: string;
+  isDuplicate: boolean;
+  duplicateOfEventId: string | null;
+}
+
+// Combines the matched rule and the AI analysis into one human-readable
+// notification body -- "Rule section" / "AI section" -- so the dashboard
+// (which falls back to rendering payload.subject/payload.body verbatim
+// when no tenant template is configured) shows something useful without
+// requiring every tenant to author a template.
+function buildDefaultContent(
+  ruleName: string,
+  eventContext: Record<string, unknown>,
+  ai: AiAnalysisSummary,
+): { subject: string; body: string } {
+  const eventType = eventContext.type as string;
+  const subject = `[${ai.severity.toUpperCase()}] ${ruleName}: ${eventType}`;
+
+  const duplicateLine = ai.isDuplicate ? `Yes (of event ${ai.duplicateOfEventId})` : "No";
+
+  const body = [
+    "Rule section",
+    `- Rule: ${ruleName}`,
+    `- Event type: ${eventType}`,
+    eventContext.source ? `- Source: ${eventContext.source as string}` : undefined,
+    "",
+    "AI section",
+    `- Summary: ${ai.summary}`,
+    `- Category: ${ai.category}`,
+    `- Severity: ${ai.severity}`,
+    `- Business impact: ${ai.businessImpact}`,
+    `- Recommended channel: ${ai.recommendedChannel}`,
+    `- Duplicate: ${duplicateLine}`,
+    "",
+    "Next steps",
+    ai.recommendation,
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+
+  return { subject, body };
 }
 
 @Injectable()
@@ -55,25 +102,44 @@ export class NotificationsService extends BaseCrudService<
   // the others). eventContext is the flattened `{type, source, tenantId,
   // ...payload}` object rule-engine already builds for condition
   // evaluation -- reused here as the variable source for template
-  // rendering (plus an `eventType` alias for `type`, per FR-6).
+  // rendering (plus an `eventType` alias for `type`, per FR-6). aiAnalysis
+  // is ai-service's completed analysis for this same event (pipeline stage
+  // 2's output) -- merged into every notification's content alongside the
+  // rule match, per action, so each one carries both a "Rule section" and
+  // an "AI section".
+  //
+  // Every match also always gets an in-app dashboard notification, even if
+  // the rule's own actions don't configure one -- a tenant shouldn't have
+  // to explicitly opt every rule into "also show this in the dashboard".
+  // Skipped only when actions already has an explicit dashboard entry, to
+  // avoid pushing the same match twice.
   async createFromMatch(
     tenantId: string,
     eventId: string,
     ruleId: string,
+    ruleName: string,
     actions: unknown,
     eventContext: Record<string, unknown>,
+    aiAnalysis: AiAnalysisSummary,
   ): Promise<void> {
+    const actionList = Array.isArray(actions) ? actions : [];
     if (!Array.isArray(actions)) {
       this.logger.warn(
         { tenantId, ruleId, eventId },
-        "Ignoring rule match: actions is not an array",
+        "Rule match actions is not an array -- only the implicit dashboard notification will be created",
       );
-      return;
     }
 
-    const variables = { ...eventContext, eventType: eventContext.type };
+    const variables = {
+      ...eventContext,
+      eventType: eventContext.type,
+      rule: { ruleId, ruleName },
+      ai: aiAnalysis,
+    };
 
-    for (const action of actions) {
+    let hasDashboardAction = false;
+
+    for (const action of actionList) {
       if (!isValidAction(action)) {
         this.logger.warn(
           { tenantId, ruleId, eventId, action },
@@ -81,159 +147,158 @@ export class NotificationsService extends BaseCrudService<
         );
         continue;
       }
-
-      let payload: Record<string, unknown> = variables;
-      if (action.template) {
-        const rendered = await renderTemplateViaGrpc(
-          env.TEMPLATE_GRPC_ADDRESS,
-          tenantId,
-          action.template,
-          action.channel,
-          variables,
-        );
-        if (rendered.found) {
-          payload = { subject: rendered.subject, body: rendered.body };
-        }
+      if (action.channel === DASHBOARD_CHANNEL) {
+        hasDashboardAction = true;
       }
 
-      const notification = await super.create({
+      await this.createAndRequestDispatch(
         tenantId,
         eventId,
         ruleId,
-        channel: action.channel,
-        target: action.target,
-        payload: payload as Prisma.InputJsonValue,
-        status: "pending",
-      });
+        ruleName,
+        action.channel,
+        action.target,
+        action.template,
+        variables,
+        eventContext,
+        aiAnalysis,
+      );
+    }
 
-      try {
-        await this.rabbitmq.publish(EXCHANGE, "notification.created", {
-          notificationId: notification.id,
-          tenantId,
-          eventId,
-          ruleId,
-          channel: notification.channel,
-          target: notification.target,
-        });
-      } catch (err) {
-        this.logger.error(
-          { err, notificationId: notification.id },
-          "Failed to publish notification.created",
-        );
-      }
-
-      await this.attemptDispatch(notification);
+    if (!hasDashboardAction) {
+      await this.createAndRequestDispatch(
+        tenantId,
+        eventId,
+        ruleId,
+        ruleName,
+        DASHBOARD_CHANNEL,
+        // Delivery is a tenant-wide socket room broadcast (see
+        // api-gateway's NotificationsGateway), not filtered by this value
+        // -- there's no single "the" user to target for an implicit,
+        // rule-config-independent dashboard notification.
+        "tenant",
+        undefined,
+        variables,
+        eventContext,
+        aiAnalysis,
+      );
     }
   }
 
-  async attemptDispatch(notification: Notification): Promise<Notification> {
-    // The dashboard channel is best-effort/real-time, not a guaranteed
-    // external send -- there's no meaningful "retry a live push" the way
-    // SMTP/webhook retries make sense. api-gateway relays this over
-    // RabbitMQ to whichever browser is actually connected; if nobody's
-    // listening, the row still exists here as `readStatus: "unread"`,
-    // fetchable later over REST.
-    if (notification.channel === DASHBOARD_CHANNEL) {
-      try {
-        await this.rabbitmq.publish(EXCHANGE, "notification.dashboard.push", {
-          notificationId: notification.id,
-          tenantId: notification.tenantId,
-          userId: notification.target,
-          payload: notification.payload,
-          createdAt: notification.createdAt,
-        });
-      } catch (err) {
-        // Matches the best-effort semantics this branch already documents
-        // above: if nobody's listening the row still counts as "sent" and
-        // is fetchable over REST, so a broker blip shouldn't be treated
-        // any differently than nobody being connected.
-        this.logger.error(
-          { err, notificationId: notification.id },
-          "Failed to publish notification.dashboard.push",
-        );
-      }
-      return super.update({ id: notification.id }, { status: "sent", sentAt: new Date() });
-    }
-
-    const result = await dispatchViaGrpc(
-      env.CHANNEL_GRPC_ADDRESS,
-      notification.channel,
-      notification.target,
-      notification.payload,
-    );
-
-    if (result.success) {
-      const sent = await super.update(
-        { id: notification.id },
-        { status: "sent", sentAt: new Date() },
+  private async createAndRequestDispatch(
+    tenantId: string,
+    eventId: string,
+    ruleId: string,
+    ruleName: string,
+    channel: string,
+    target: string,
+    template: string | undefined,
+    variables: Record<string, unknown>,
+    eventContext: Record<string, unknown>,
+    aiAnalysis: AiAnalysisSummary,
+  ): Promise<void> {
+    let payload: Record<string, unknown> = {
+      ...buildDefaultContent(ruleName, eventContext, aiAnalysis),
+      rule: { ruleId, ruleName },
+      ai: aiAnalysis,
+    };
+    if (template) {
+      const rendered = await renderTemplateViaGrpc(
+        env.TEMPLATE_GRPC_ADDRESS,
+        tenantId,
+        template,
+        channel,
+        variables,
       );
-      try {
-        await this.rabbitmq.publish(EXCHANGE, "notification.sent", {
-          notificationId: sent.id,
-          tenantId: sent.tenantId,
-          channel: sent.channel,
-          target: sent.target,
-        });
-      } catch (err) {
-        // The channel dispatch already succeeded and the row is already
-        // "sent" -- a publish failure here is a lost analytics/audit
-        // event, not a failed send, so it must not throw back to the
-        // caller (which would otherwise nack the whole matched-rule
-        // message, see RabbitMQService.consume).
-        this.logger.error({ err, notificationId: sent.id }, "Failed to publish notification.sent");
+      if (rendered.found) {
+        payload = { subject: rendered.subject, body: rendered.body };
       }
-      return sent;
     }
 
-    const attempts = notification.attempts + 1;
-    if (attempts >= notification.maxAttempts) {
-      const deadLettered = await super.update(
-        { id: notification.id },
-        { status: "dead_letter", attempts, lastError: result.error },
-      );
-      try {
-        await this.rabbitmq.publish(EXCHANGE, "notification.dead", {
-          notificationId: deadLettered.id,
-          tenantId: deadLettered.tenantId,
-          channel: deadLettered.channel,
-          target: deadLettered.target,
-          error: result.error,
-        });
-      } catch (err) {
-        this.logger.error(
-          { err, notificationId: deadLettered.id },
-          "Failed to publish notification.dead",
-        );
-      }
-      return deadLettered;
-    }
+    const notification = await super.create({
+      tenantId,
+      eventId,
+      ruleId,
+      channel,
+      target,
+      payload: payload as Prisma.InputJsonValue,
+      status: "pending",
+    });
 
-    const delay = retryBackoffMs[Math.min(attempts - 1, retryBackoffMs.length - 1)] ?? 60000;
-    const retrying = await super.update(
-      { id: notification.id },
-      {
-        status: "retrying",
-        attempts,
-        lastError: result.error,
-        nextAttemptAt: new Date(Date.now() + delay),
-      },
-    );
+    await this.requestDispatch(notification);
+  }
+
+  // Publishes the one event channel-service acts on to actually send a
+  // notification -- used both for a brand-new row (above) and to
+  // re-trigger a retry (RetrySchedulerService). notification-service never
+  // calls channel-service directly: this publish is the full handoff, and
+  // the row's state is only updated later, reactively, when channel-
+  // service reports an outcome (see markSent/markRetrying/markDeadLetter
+  // and NotificationResultConsumerService).
+  async requestDispatch(notification: Notification): Promise<void> {
     try {
-      await this.rabbitmq.publish(EXCHANGE, "notification.retry", {
-        notificationId: retrying.id,
-        tenantId: retrying.tenantId,
-        channel: retrying.channel,
-        target: retrying.target,
-        attempts,
-        nextAttemptAt: retrying.nextAttemptAt,
+      await this.rabbitmq.publish(EXCHANGE, "notification.created", {
+        notificationId: notification.id,
+        tenantId: notification.tenantId,
+        eventId: notification.eventId,
+        ruleId: notification.ruleId,
+        channel: notification.channel,
+        target: notification.target,
+        payload: notification.payload,
+        attempts: notification.attempts,
+        maxAttempts: notification.maxAttempts,
       });
     } catch (err) {
       this.logger.error(
-        { err, notificationId: retrying.id },
-        "Failed to publish notification.retry",
+        { err, notificationId: notification.id },
+        "Failed to publish notification.created",
       );
     }
-    return retrying;
+  }
+
+  // The three outcomes NotificationResultConsumerService hands back from
+  // channel-service. Best-effort: an update failure here means this row's
+  // status lags the real delivery outcome, which isn't worth nacking (and
+  // re-delivering) the outcome event for -- there's no retry semantics for
+  // "retry recording that a retry happened".
+  async markSent(notificationId: string): Promise<void> {
+    await this.applyOutcome(notificationId, { status: "sent", sentAt: new Date() });
+  }
+
+  async markRetrying(
+    notificationId: string,
+    attempts: number,
+    error: string,
+    nextAttemptAt: Date,
+  ): Promise<void> {
+    await this.applyOutcome(notificationId, {
+      status: "retrying",
+      attempts,
+      lastError: error,
+      nextAttemptAt,
+    });
+  }
+
+  async markDeadLetter(notificationId: string, attempts: number, error: string): Promise<void> {
+    await this.applyOutcome(notificationId, {
+      status: "dead_letter",
+      attempts,
+      lastError: error,
+    });
+  }
+
+  private async applyOutcome(
+    notificationId: string,
+    data: Prisma.NotificationUpdateInput,
+  ): Promise<void> {
+    try {
+      await super.update({ id: notificationId }, data);
+    } catch (err) {
+      this.logger.error(
+        { err, notificationId },
+        "Failed to apply dispatch outcome to notification",
+      );
+    }
   }
 
   // Used by RetrySchedulerService's poll loop, not exposed over gRPC.
@@ -241,6 +306,15 @@ export class NotificationsService extends BaseCrudService<
     return this.prisma.notification.findMany({
       where: { status: "retrying", nextAttemptAt: { lte: new Date() } },
     });
+  }
+
+  // Claims a due row before redispatching it -- see RetrySchedulerService.
+  // Moving it out of "retrying" is what stops the next poll tick (still
+  // every RETRY_POLL_INTERVAL_MS) from picking the same row up again
+  // before channel-service's async outcome comes back and moves it
+  // somewhere else.
+  async markDispatching(notification: Notification): Promise<Notification> {
+    return super.update({ id: notification.id }, { status: "dispatching" });
   }
 
   async findAllForTenant(

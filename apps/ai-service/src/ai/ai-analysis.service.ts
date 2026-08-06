@@ -13,14 +13,26 @@ import { env } from "../env";
 const ANALYSIS_SEARCHABLE_FIELDS = ["type", "category", "severity", "businessImpact", "status"];
 const EXCHANGE = "platform";
 const AI_COMPLETED_ROUTING_KEY = "event.ai.completed";
+const AUDIT_CREATED_ROUTING_KEY = "audit.created";
 
+interface RuleMatchEntry {
+  ruleId: string;
+  ruleName: string;
+  actions: unknown;
+}
+
+// Renamed from event.created's shape to what rule-engine-service now
+// publishes on event.rule.matched (pipeline stage 1's output) -- `matches`
+// is passed straight through to event.ai.completed so notification-service
+// (stage 3) doesn't need to look rule matches up separately.
 export interface EventCreatedMessage {
   eventId: string;
   tenantId: string;
   type: string;
   source?: string;
   payload: Record<string, unknown>;
-  createdAt: string;
+  matchedAt: string;
+  matches: RuleMatchEntry[];
 }
 
 @Injectable()
@@ -78,6 +90,7 @@ export class AiAnalysisService extends BaseCrudService<
         severity: result.severity,
         businessImpact: result.businessImpact,
         recommendation: result.recommendation,
+        recommendedChannel: result.recommendedChannel,
         isDuplicate: result.isDuplicate,
         duplicateOfEventId: result.duplicateOfEventId,
         status: "completed",
@@ -87,12 +100,20 @@ export class AiAnalysisService extends BaseCrudService<
       // "completed" row is already committed at this point, so a publish
       // failure here must not fall into the outer catch below, which
       // would record a second, contradictory "failed" row for an
-      // analysis that actually succeeded.
+      // analysis that actually succeeded. It still breaks the pipeline
+      // for this event though (notification-service, stage 3, never sees
+      // it), so it gets its own audit trail rather than silently
+      // swallowing.
       try {
         await this.rabbitmq.publish(EXCHANGE, AI_COMPLETED_ROUTING_KEY, {
           analysisId: analysis.id,
           tenantId: analysis.tenantId,
           eventId: analysis.eventId,
+          type: message.type,
+          source: message.source,
+          payload: message.payload,
+          matchedAt: message.matchedAt,
+          matches: message.matches,
           provider: analysis.provider,
           model: analysis.model,
           summary: analysis.summary,
@@ -100,13 +121,16 @@ export class AiAnalysisService extends BaseCrudService<
           severity: analysis.severity,
           businessImpact: analysis.businessImpact,
           recommendation: analysis.recommendation,
+          recommendedChannel: analysis.recommendedChannel,
           isDuplicate: analysis.isDuplicate,
           duplicateOfEventId: analysis.duplicateOfEventId,
         });
       } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
         this.logger.error(
-          `Failed to publish event.ai.completed for analysis ${analysis.id}: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to publish event.ai.completed for analysis ${analysis.id}: ${errorMessage}`,
         );
+        await this.publishAudit(message, "event.ai.publish_failed", errorMessage);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -124,10 +148,37 @@ export class AiAnalysisService extends BaseCrudService<
         severity: "low",
         businessImpact: "low",
         recommendation: "",
+        recommendedChannel: "",
         isDuplicate: false,
         status: "failed",
         error: errorMessage,
       });
+      await this.publishAudit(message, "event.ai.failed", errorMessage);
+      throw error;
+    }
+  }
+
+  // Best-effort: audit visibility must never mask the underlying failure
+  // (analyzeEvent's caller still throws/logs regardless of whether this
+  // succeeds).
+  private async publishAudit(
+    message: EventCreatedMessage,
+    action: "event.ai.failed" | "event.ai.publish_failed",
+    error: string,
+  ): Promise<void> {
+    try {
+      await this.rabbitmq.publish(EXCHANGE, AUDIT_CREATED_ROUTING_KEY, {
+        tenantId: message.tenantId,
+        actorId: null,
+        action,
+        targetType: "event",
+        targetId: message.eventId,
+        metadata: { type: message.type, stage: "ai", error },
+      });
+    } catch (auditErr) {
+      this.logger.error(
+        `Failed to publish audit.created for event ${message.eventId}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+      );
     }
   }
 

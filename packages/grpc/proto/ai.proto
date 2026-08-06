@@ -20,6 +20,7 @@ message EventAnalysisMessage {
   string error = 15;
   string created_at = 16;
   string updated_at = 17;
+  string recommended_channel = 18;
 }
 
 // Mirrors RawListQuery (packages/common/src/list-query.ts). Empty string

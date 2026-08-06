@@ -7,6 +7,7 @@ const VARIANTS: Record<string, "success" | "destructive" | "warning" | "secondar
   completed: "success",
   received: "secondary",
   pending: "secondary",
+  dispatching: "secondary",
   retrying: "warning",
   suspended: "warning",
   failed: "destructive",

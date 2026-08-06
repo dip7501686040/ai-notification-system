@@ -359,6 +359,9 @@ importers:
       '@ai-notification/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@ai-notification/rabbitmq':
+        specifier: workspace:*
+        version: link:../../packages/rabbitmq
       '@ai-notification/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
