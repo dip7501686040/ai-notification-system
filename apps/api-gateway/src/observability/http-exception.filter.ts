@@ -29,10 +29,19 @@ export class HttpLoggingExceptionFilter implements ExceptionFilter {
         : { statusCode: status, message: exception.getResponse() };
     const message = exception instanceof Error ? exception.message : "Unhandled exception";
 
-    this.logger[status >= 500 ? "error" : "warn"](
-      { err: exception, method: request.method, url: request.url, status },
-      message,
-    );
+    // 5xx are real failures -- keep the full `err` (pino's err serializer
+    // dumps the stack) so they're debuggable in Loki. 4xx are expected
+    // client outcomes (expired token, bad input, etc.) that happen on every
+    // request cycle -- logging their stack trace as if they were errors is
+    // pure noise, so just log the short message.
+    if (status >= 500) {
+      this.logger.error(
+        { err: exception, method: request.method, url: request.url, status },
+        message,
+      );
+    } else {
+      this.logger.warn({ method: request.method, url: request.url, status }, message);
+    }
 
     response.status(status).json(body);
   }
