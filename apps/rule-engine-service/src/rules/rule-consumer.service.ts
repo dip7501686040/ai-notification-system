@@ -128,7 +128,7 @@ export class RuleConsumerService implements OnModuleInit {
       },
       "[rule-engine-service]: Publishing event.rule.matched",
     );
-    // Consumed event.created: before publishing event.rule.matched
+    // DEMO BREAKPOINT: before publishing event.rule.matched
     await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
       eventId: message.eventId,
       tenantId: message.tenantId,

@@ -61,6 +61,7 @@ export class ChannelConsumerService implements OnModuleInit {
       },
       "[channel-service]: Publishing notification.created",
     );
+    // DEMO BREAKPOINT: after consuming notification.created
     if (message.channel === DASHBOARD_CHANNEL) {
       await this.dispatchDashboard(message);
       return;
