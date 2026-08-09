@@ -1,6 +1,7 @@
 import { Injectable, type OnModuleInit } from "@nestjs/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import type { Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { RulesService } from "./rules.service";
@@ -52,6 +53,17 @@ export class RuleConsumerService implements OnModuleInit {
   }
 
   private async handleEvent(message: EventCreatedMessage): Promise<void> {
+    this.logger.info(
+      {
+        ...getTraceContext(),
+        event_type: EVENT_CREATED_ROUTING_KEY,
+        step: "consume",
+        eventId: message.eventId,
+        tenantId: message.tenantId,
+      },
+      "[rule-engine-service]: Consumed event.created",
+    );
+    // DEMO BREAKPOINT: after consuming event.created
     try {
       await this.evaluateAndPublish(message);
     } catch (err) {
@@ -100,17 +112,23 @@ export class RuleConsumerService implements OnModuleInit {
       });
 
       matches.push({ ruleId: rule.id, ruleName: rule.name, actions: rule.actions });
-
-      this.logger.info(
-        { tenantId: rule.tenantId, ruleId: rule.id, eventId: message.eventId },
-        `Rule "${rule.name}" matched event`,
-      );
     }
 
     if (matches.length === 0) {
       return;
     }
 
+    this.logger.info(
+      {
+        ...getTraceContext(),
+        event_type: RULE_MATCHED_ROUTING_KEY,
+        step: "publish",
+        eventId: message.eventId,
+        tenantId: message.tenantId,
+      },
+      "[rule-engine-service]: Publishing event.rule.matched",
+    );
+    // Consumed event.created: before publishing event.rule.matched
     await this.rabbitmq.publish(EVENTS_EXCHANGE, RULE_MATCHED_ROUTING_KEY, {
       eventId: message.eventId,
       tenantId: message.tenantId,

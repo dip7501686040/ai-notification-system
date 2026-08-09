@@ -1,5 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import { ChannelDispatchService } from "./channel-dispatch.service";
 import { env } from "../env";
 
@@ -30,6 +32,9 @@ interface NotificationCreatedMessage {
 @Injectable()
 export class ChannelConsumerService implements OnModuleInit {
   private readonly logger = new Logger(ChannelConsumerService.name);
+  // Structured (pino) logger for the demo pipeline log lines only -- keeps
+  // field names identical across every service for Loki filtering.
+  private readonly structuredLogger = createLogger("channel-service");
   private readonly retryBackoffMs: number[];
 
   constructor(
@@ -46,6 +51,16 @@ export class ChannelConsumerService implements OnModuleInit {
   }
 
   private async handleNotificationCreated(message: NotificationCreatedMessage): Promise<void> {
+    this.structuredLogger.info(
+      {
+        ...getTraceContext(),
+        event_type: "notification.created",
+        step: "consume",
+        notificationId: message.notificationId,
+        tenantId: message.tenantId,
+      },
+      "[channel-service]: Publishing notification.created",
+    );
     if (message.channel === DASHBOARD_CHANNEL) {
       await this.dispatchDashboard(message);
       return;
@@ -89,6 +104,17 @@ export class ChannelConsumerService implements OnModuleInit {
   // "sent" signal for this row.
   private async dispatchDashboard(message: NotificationCreatedMessage): Promise<void> {
     try {
+      this.structuredLogger.info(
+        {
+          ...getTraceContext(),
+          event_type: "notification.dashboard.push",
+          step: "publish",
+          notificationId: message.notificationId,
+          tenantId: message.tenantId,
+        },
+        "[channel-service]: Publishing notification.dashboard.push",
+      );
+      // DEMO BREAKPOINT: before publishing notification.dashboard.push
       await this.rabbitmq.publish(EXCHANGE, "notification.dashboard.push", {
         notificationId: message.notificationId,
         tenantId: message.tenantId,
@@ -105,6 +131,17 @@ export class ChannelConsumerService implements OnModuleInit {
 
   private async publishSent(message: NotificationCreatedMessage): Promise<void> {
     try {
+      this.structuredLogger.info(
+        {
+          ...getTraceContext(),
+          event_type: "notification.sent",
+          step: "publish",
+          notificationId: message.notificationId,
+          tenantId: message.tenantId,
+        },
+        "[channel-service]: Publishing notification.sent",
+      );
+      // DEMO BREAKPOINT: before publishing notification.sent
       await this.rabbitmq.publish(EXCHANGE, "notification.sent", {
         notificationId: message.notificationId,
         tenantId: message.tenantId,

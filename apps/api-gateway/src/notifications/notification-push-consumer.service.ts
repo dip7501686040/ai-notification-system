@@ -1,5 +1,7 @@
 import { Injectable, type OnModuleInit } from "@nestjs/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import { NotificationsGateway } from "./notifications.gateway";
 
 const EVENTS_EXCHANGE = "platform";
@@ -21,6 +23,8 @@ interface NotificationPushMessage {
 // in Postgres via notification-service, fetchable later over REST).
 @Injectable()
 export class NotificationPushConsumerService implements OnModuleInit {
+  private readonly logger = createLogger("api-gateway");
+
   constructor(
     private readonly rabbitmq: RabbitMQService,
     private readonly gateway: NotificationsGateway,

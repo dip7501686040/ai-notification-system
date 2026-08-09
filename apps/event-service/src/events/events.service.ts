@@ -8,6 +8,7 @@ import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notifica
 import { checkMembershipViaGrpc, hasMatchingRuleViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import type { Prisma, Event } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env } from "../env";
@@ -71,6 +72,17 @@ export class EventsService extends BaseCrudService<
     });
 
     try {
+      this.logger.info(
+        {
+          ...getTraceContext(),
+          event_type: EVENT_CREATED_ROUTING_KEY,
+          step: "publish",
+          eventId: event.id,
+          tenantId: event.tenantId,
+        },
+        "[event-service]: Publishing event.created",
+      );
+      // DEMO BREAKPOINT: before publishing event.created
       await this.rabbitmq.publish(EVENTS_EXCHANGE, EVENT_CREATED_ROUTING_KEY, {
         eventId: event.id,
         tenantId: event.tenantId,

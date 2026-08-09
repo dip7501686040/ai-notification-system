@@ -116,6 +116,89 @@ All of this is backed by a `TenantMetricsInterceptor` on the gateway (tags every
 - **Grafana embedding** required one infra setting most people miss: Grafana blocks iframe embedding by default (`X-Frame-Options: deny`) — this stack has `GF_SECURITY_ALLOW_EMBEDDING=true` set specifically so the tenant-scoped dashboards can be embedded. If you ever see "refused to connect" _only inside an iframe_ while the same URL works in a new tab, this is the setting to check first.
 - **Resource usage is platform-wide, not tenant-attributable** — containers aren't partitioned per tenant, so "System Health" necessarily shows everyone's load, not just one tenant's.
 
-## 8. Reproducing this from scratch
+## 8. Live pipeline debugging — breakpoints + trace-correlated logs
+
+For a step-by-step recording of one event moving through the full pipeline (`api-gateway → event-service → rule-engine-service → ai-service → notification-service → channel-service → api-gateway`), every major publish/consume/state-change point has a structured log line immediately followed by a `// DEMO BREAKPOINT: ...` comment. Set a VS Code breakpoint on the line directly under each comment (the line still holds the log call, not the comment itself — click the gutter one line below the marker) across each service's multi-target debugger, then submit a `payment.failed` (or any) test event from the UI's "Test event" form and step through.
+
+### Log fields
+
+Every one of these log lines is emitted through the project's existing pino logger (`createLogger()` from `@ai-notification/logger`) and carries identical field names across all six services:
+
+| Field                 | Meaning                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `service`             | Set automatically by `createLogger()`'s pino `base` config                                                                                |
+| `trace_id`, `span_id` | Pulled from the active OTel span via `getTraceContext()` (`@ai-notification/telemetry`) — same `trace_id` end-to-end for one pipeline run |
+| `event_type`          | The RabbitMQ routing key/topic this log point belongs to (e.g. `event.created`, `event.rule.matched`)                                     |
+| `step`                | `"consume"` \| `"publish"` \| `"processed"` (state change) — api-gateway's initial gRPC hop uses `"dispatch"` since it isn't a queue op   |
+| `timestamp`           | ISO 8601, added automatically by pino                                                                                                     |
+
+### Breakpoint list (pipeline order)
+
+**api-gateway — initial hop** (`apps/api-gateway/src/events/events.controller.ts`)
+
+- L62 — before dispatching `CreateEvent` gRPC call (API key auth) to event-service
+- L69 — before dispatching `CreateEvent` gRPC call to event-service
+
+**event-service** (`apps/event-service/src/events/events.service.ts`)
+
+- L76 — before persisting the event row
+- L96 — before publishing `event.created`
+
+**rule-engine-service** (`apps/rule-engine-service/src/rules/rule-consumer.service.ts`)
+
+- L66 — after consuming `event.created`
+- L116 — before persisting the rule match
+- L143 — before publishing `event.rule.matched`
+
+**ai-service**
+
+- `apps/ai-service/src/ai/ai-consumer.service.ts` L41 — after consuming `event.rule.matched`
+- `apps/ai-service/src/ai/ai-analysis.service.ts` L99 — before generating the AI analysis
+- `apps/ai-service/src/ai/ai-analysis.service.ts` L139 — before publishing `event.ai.completed`
+
+**notification-service**
+
+- `apps/notification-service/src/notifications/notification-consumer.service.ts` L73 — after consuming `event.ai.completed`
+- `apps/notification-service/src/notifications/notifications.service.ts` L232 — before saving the notification row
+- `apps/notification-service/src/notifications/notifications.service.ts` L266 — before publishing `notification.created`
+
+**channel-service** (`apps/channel-service/src/channel/channel-consumer.service.ts`)
+
+- L64 — after consuming `notification.created`
+- L77 — before dispatching on the selected channel
+- L131 — before publishing `notification.dashboard.push` (dashboard channel path)
+- L158 — before publishing `notification.sent` (email/webhook channel path)
+
+**api-gateway — final hop** (`apps/api-gateway/src/notifications/notification-push-consumer.service.ts`)
+
+- L50 — after consuming `notification.dashboard.push`
+- L61 — before emitting the notification to the dashboard socket room (this is what makes it appear in the UI)
+
+### Tailing one trace's logs live
+
+Every log line above lands in Loki (via the OTel collector's `loki` exporter) with the Loki stream label `service_name`. The `event_type`/`step`/`tenantId`/etc. fields we added land nested under `attributes.*` in the log body, matching the convention the tenant Observability dashboard already uses (`infra/grafana/provisioning/dashboards/tenant-observability.json`) — **but** `trace_id`/`span_id` do not: the OTel pino bridge (`@opentelemetry/instrumentation-pino`) recognizes those two field names specifically as trace-correlation data and hoists them out of `attributes` into the log record's own native fields, exported as top-level `traceid`/`spanid` (no underscore). Query those as top-level fields, not under `attributes.`.
+
+Grab the `trace_id` from the first log line (or from the trace in Jaeger at http://localhost:16686 for the request), then:
+
+**Grafana Explore** (http://localhost:3011/explore, Loki datasource):
+
+```logql
+{service_name=~".+"}
+  | json traceid, spanid, event_type="attributes.event_type", step="attributes.step"
+  | traceid="50134ad28e222af9d3201a1ab93cdbc8"
+  | line_format "service={{.service_name}} step={{.step}} event_type={{.event_type}} trace_id={{.traceid}}"
+```
+
+**logcli** (timestamp is included by default — no extra flags needed):
+
+```bash
+logcli query \
+  '{service_name=~".+"} | json traceid, spanid, event_type="attributes.event_type", step="attributes.step" | traceid="<TRACE_ID>" | line_format "service={{.service_name}} step={{.step}} event_type={{.event_type}} trace_id={{.traceid}}"' \
+  --addr=http://localhost:3100 --since=1h --tail
+```
+
+Either way, the output is one line per pipeline stage, in the order the stages actually fired, each showing which service handled it, whether it was a consume/publish/processed step, and the topic — enough to confirm the recording matches the code path being stepped through.
+
+## 9. Reproducing this from scratch
 
 `scripts/seed-demo-data.sh` (repo root) creates two fresh tenants and runs through the same sequence described above end-to-end — registers two owner accounts, creates both tenants, invites one owner into the other as a member, seeds templates/rules/events/an API key, and points Tenant 1's AI config at Ollama. Requires the full stack up (`docker compose up -d`) and the `qwen2.5:0.5b`/`nomic-embed-text` Ollama models pulled (the `ollama-pull` init container in `docker-compose.yml` does this automatically on first stack startup).

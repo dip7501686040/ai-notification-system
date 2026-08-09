@@ -2,6 +2,8 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nest
 import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notification/common";
 import { checkMembershipViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import type { EventAnalysis, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AiConfigService } from "./ai-config.service";
@@ -45,6 +47,11 @@ export class AiAnalysisService extends BaseCrudService<
   Prisma.EventAnalysisOrderByWithRelationInput
 > {
   private readonly logger = new Logger(AiAnalysisService.name);
+  // Structured (pino) logger for the demo pipeline log lines only -- keeps
+  // field names (service, trace_id, span_id, event_type, step, timestamp)
+  // identical across every service for Loki filtering, alongside the Nest
+  // Logger above used for existing warn/error messages.
+  private readonly structuredLogger = createLogger("ai-service");
 
   constructor(
     private readonly prisma: PrismaService,
@@ -105,6 +112,18 @@ export class AiAnalysisService extends BaseCrudService<
       // it), so it gets its own audit trail rather than silently
       // swallowing.
       try {
+        this.structuredLogger.info(
+          {
+            ...getTraceContext(),
+            event_type: AI_COMPLETED_ROUTING_KEY,
+            step: "publish",
+            eventId: analysis.eventId,
+            tenantId: analysis.tenantId,
+            analysisId: analysis.id,
+          },
+          "[ai-service]: Publishing event.ai.completed",
+        );
+        // DEMO BREAKPOINT: before publishing event.ai.completed
         await this.rabbitmq.publish(EXCHANGE, AI_COMPLETED_ROUTING_KEY, {
           analysisId: analysis.id,
           tenantId: analysis.tenantId,

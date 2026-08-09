@@ -46,3 +46,21 @@ export function tagTenant(tenantId: string): void {
 export function getMeter(name: string): Meter {
   return metrics.getMeter(name);
 }
+
+export interface TraceContext {
+  trace_id?: string;
+  span_id?: string;
+}
+
+// Pulls trace_id/span_id off the active OTel span so log lines stay
+// correlated with the request's Jaeger trace without every call site
+// touching the OTel API directly. Fields are undefined outside any span
+// (pino drops undefined keys), so pino's JSON output stays consistent
+// whether or not a trace is active.
+export function getTraceContext(): TraceContext {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  return {
+    trace_id: spanContext?.traceId,
+    span_id: spanContext?.spanId,
+  };
+}

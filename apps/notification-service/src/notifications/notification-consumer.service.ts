@@ -1,5 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
+import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import { NotificationsService, type AiAnalysisSummary } from "./notifications.service";
 
 const EXCHANGE = "platform";
@@ -42,6 +44,9 @@ interface AiCompletedMessage {
 @Injectable()
 export class NotificationConsumerService implements OnModuleInit {
   private readonly logger = new Logger(NotificationConsumerService.name);
+  // Structured (pino) logger for the demo pipeline log lines only -- keeps
+  // field names identical across every service for Loki filtering.
+  private readonly structuredLogger = createLogger("notification-service");
 
   constructor(
     private readonly rabbitmq: RabbitMQService,
@@ -55,6 +60,17 @@ export class NotificationConsumerService implements OnModuleInit {
   }
 
   private async handleAiCompleted(message: AiCompletedMessage): Promise<void> {
+    this.structuredLogger.info(
+      {
+        ...getTraceContext(),
+        event_type: ROUTING_KEY,
+        step: "consume",
+        eventId: message.eventId,
+        tenantId: message.tenantId,
+      },
+      "[notification-service]: Consumed event.ai.completed",
+    );
+    // DEMO BREAKPOINT: after consuming event.ai.completed
     const eventContext: Record<string, unknown> = {
       type: message.type,
       source: message.source,

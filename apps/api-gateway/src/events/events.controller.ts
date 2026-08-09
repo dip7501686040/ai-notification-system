@@ -17,11 +17,15 @@ import {
   listEventsViaGrpc,
   getEventViaGrpc,
 } from "@ai-notification/grpc";
+import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import { grpcCall } from "../grpc-call";
 import { env } from "../env";
 import { GrpcAuthGuard, type AuthenticatedUser } from "../auth/grpc-auth.guard";
 import { EventIngestAuthGuard } from "../auth/event-ingest-auth.guard";
 import { CreateEventDto } from "./dto/create-event.dto";
+
+const EVENT_CREATED_TOPIC = "event.created";
 
 function currentUser(req: Request): AuthenticatedUser {
   return (req as Request & { user: AuthenticatedUser }).user;
@@ -36,6 +40,8 @@ function apiKeyTenantId(req: Request): string | undefined {
 // class-level @UseGuards().
 @Controller("events")
 export class EventsController {
+  private readonly logger = createLogger("api-gateway");
+
   @UseGuards(EventIngestAuthGuard)
   @Post()
   create(@Req() req: Request, @Body() dto: CreateEventDto) {
@@ -45,6 +51,11 @@ export class EventsController {
       // able to claim a different tenant by putting it in the body.
       return grpcCall(() => ingestEventViaApiKeyGrpc(env.EVENT_GRPC_ADDRESS, tenantId, dto));
     }
+    this.logger.info(
+      { ...getTraceContext(), event_type: EVENT_CREATED_TOPIC, step: "dispatch", type: dto.type },
+      "[api-gateway]: Dispatching CreateEvent to event-service via gRPC",
+    );
+    // DEMO BREAKPOINT: before dispatching CreateEvent gRPC call to event-service
     return grpcCall(() => createEventViaGrpc(env.EVENT_GRPC_ADDRESS, currentUser(req).id, dto));
   }
 

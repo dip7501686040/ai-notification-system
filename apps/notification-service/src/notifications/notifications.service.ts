@@ -3,6 +3,7 @@ import { BaseCrudService, type Paginated, type RawListQuery } from "@ai-notifica
 import { checkMembershipViaGrpc, renderTemplateViaGrpc } from "@ai-notification/grpc";
 import { RabbitMQService } from "@ai-notification/rabbitmq";
 import { createLogger } from "@ai-notification/logger";
+import { getTraceContext } from "@ai-notification/telemetry";
 import type { Notification, Prisma } from "../../generated/prisma-client";
 import { PrismaService } from "../prisma/prisma.service";
 import { env } from "../env";
@@ -10,6 +11,7 @@ import { env } from "../env";
 const NOTIFICATION_SEARCHABLE_FIELDS = ["channel", "target", "status"];
 const EXCHANGE = "platform";
 const DASHBOARD_CHANNEL = "dashboard";
+const NOTIFICATION_CREATED_ROUTING_KEY = "notification.created";
 
 interface RuleAction {
   channel: string;
@@ -237,7 +239,19 @@ export class NotificationsService extends BaseCrudService<
   // and NotificationResultConsumerService).
   async requestDispatch(notification: Notification): Promise<void> {
     try {
-      await this.rabbitmq.publish(EXCHANGE, "notification.created", {
+      this.logger.info(
+        {
+          ...getTraceContext(),
+          event_type: NOTIFICATION_CREATED_ROUTING_KEY,
+          step: "publish",
+          eventId: notification.eventId,
+          tenantId: notification.tenantId,
+          notificationId: notification.id,
+        },
+        "[notification-service]: Publishing notification.created",
+      );
+      // DEMO BREAKPOINT: before publishing notification.created
+      await this.rabbitmq.publish(EXCHANGE, NOTIFICATION_CREATED_ROUTING_KEY, {
         notificationId: notification.id,
         tenantId: notification.tenantId,
         eventId: notification.eventId,
