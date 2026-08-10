@@ -110,11 +110,9 @@ export class NotificationsService extends BaseCrudService<
   // rule match, per action, so each one carries both a "Rule section" and
   // an "AI section".
   //
-  // Every match also always gets an in-app dashboard notification, even if
-  // the rule's own actions don't configure one -- a tenant shouldn't have
-  // to explicitly opt every rule into "also show this in the dashboard".
-  // Skipped only when actions already has an explicit dashboard entry, to
-  // avoid pushing the same match twice.
+  // One notification per configured action, no more -- a rule with no
+  // actions (or only malformed ones) produces zero notifications for this
+  // match rather than an implicit fallback.
   async createFromMatch(
     tenantId: string,
     eventId: string,
@@ -128,7 +126,7 @@ export class NotificationsService extends BaseCrudService<
     if (!Array.isArray(actions)) {
       this.logger.warn(
         { tenantId, ruleId, eventId },
-        "Rule match actions is not an array -- only the implicit dashboard notification will be created",
+        "Rule match actions is not an array -- no notification will be created for this match",
       );
     }
 
@@ -139,8 +137,6 @@ export class NotificationsService extends BaseCrudService<
       ai: aiAnalysis,
     };
 
-    let hasDashboardAction = false;
-
     for (const action of actionList) {
       if (!isValidAction(action)) {
         this.logger.warn(
@@ -148,9 +144,6 @@ export class NotificationsService extends BaseCrudService<
           "Skipping malformed action for rule match",
         );
         continue;
-      }
-      if (action.channel === DASHBOARD_CHANNEL) {
-        hasDashboardAction = true;
       }
 
       await this.createAndRequestDispatch(
@@ -161,25 +154,6 @@ export class NotificationsService extends BaseCrudService<
         action.channel,
         action.target,
         action.template,
-        variables,
-        eventContext,
-        aiAnalysis,
-      );
-    }
-
-    if (!hasDashboardAction) {
-      await this.createAndRequestDispatch(
-        tenantId,
-        eventId,
-        ruleId,
-        ruleName,
-        DASHBOARD_CHANNEL,
-        // Delivery is a tenant-wide socket room broadcast (see
-        // api-gateway's NotificationsGateway), not filtered by this value
-        // -- there's no single "the" user to target for an implicit,
-        // rule-config-independent dashboard notification.
-        "tenant",
-        undefined,
         variables,
         eventContext,
         aiAnalysis,
