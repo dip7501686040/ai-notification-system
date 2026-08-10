@@ -59,7 +59,7 @@ export class ChannelConsumerService implements OnModuleInit {
         notificationId: message.notificationId,
         tenantId: message.tenantId,
       },
-      "[channel-service]: Publishing notification.created",
+      "[channel-service]: Consumed notification.created",
     );
     // DEMO BREAKPOINT: after consuming notification.created
     if (message.channel === DASHBOARD_CHANNEL) {
