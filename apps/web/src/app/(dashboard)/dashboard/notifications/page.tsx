@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/lib/tenant-context";
 import { useMarkNotificationRead, useNotifications } from "@/lib/hooks/use-notifications";
-import { useNotificationSocket } from "@/lib/hooks/use-notification-socket";
+import { useNotificationSocket, type LiveNotification } from "@/lib/hooks/use-notification-socket";
 import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
@@ -34,12 +34,38 @@ export default function NotificationsPage() {
   const { data, isLoading } = useNotifications(tenantId);
   const markRead = useMarkNotificationRead(tenantId);
 
-  const handleLiveNotification = useCallback(() => {
-    toast.success("New notification received");
+  const handleLiveNotification = useCallback(
+    (notification: LiveNotification) => {
+      // Newest-first sort (useNotifications) means the just-arrived
+      // notification always renders as the first card once this refetch
+      // lands -- so "jump to it" is just scrolling the dashboard's
+      // scrollable <main> (see (dashboard)/layout.tsx) back to the top.
+      toast.success(notification.payload.subject ?? "New notification received", {
+        description: notification.payload.body,
+        // Notification bodies can run several lines (rule + AI sections,
+        // see buildDefaultContent in notifications.service.ts) -- clamp so
+        // the toast stays a fixed, small size instead of growing to fit.
+        classNames: { title: "line-clamp-1", description: "line-clamp-2" },
+        duration: 8000,
+        action: {
+          label: "View",
+          onClick: () => document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" }),
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: ["notifications", tenantId] });
+    },
+    [queryClient, tenantId],
+  );
+
+  // No toast here -- this fires on every pending -> sent/retrying/
+  // dead_letter transition for existing rows (email/webhook channels),
+  // not just brand-new ones. A silent refetch is enough to flip the
+  // StatusBadge live instead of only on the next manual reload.
+  const handleStatusUpdate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["notifications", tenantId] });
   }, [queryClient, tenantId]);
 
-  const socketStatus = useNotificationSocket(tenantId, handleLiveNotification);
+  const socketStatus = useNotificationSocket(tenantId, handleLiveNotification, handleStatusUpdate);
 
   return (
     <div className="flex flex-col gap-6">

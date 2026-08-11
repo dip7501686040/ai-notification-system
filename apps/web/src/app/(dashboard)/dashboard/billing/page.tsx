@@ -47,7 +47,7 @@ const PLANS: Plan[] = [
 function BillingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { activeTenant, activeRole } = useTenant();
+  const { activeTenant, activeRole, refetchTenants } = useTenant();
   const tenantId = activeTenant!.id;
   const currentPlan = activeTenant!.plan;
   const canManage = activeRole === "owner" || activeRole === "admin";
@@ -56,11 +56,26 @@ function BillingContent() {
   const createPortal = useCreatePortalSession(tenantId);
   const cancelSubscription = useCancelSubscription(tenantId);
 
+  // Plan changes land via an async Stripe webhook, not the mutation
+  // response itself, so the DB row may not be updated yet when we're
+  // ready to refetch. Poll for a few seconds instead of a single refetch.
+  async function pollForPlanChange(previousPlan: string) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const tenants = await refetchTenants();
+      const tenant = tenants.find((t) => t.id === tenantId);
+      if (tenant && tenant.plan !== previousPlan) {
+        return;
+      }
+    }
+  }
+
   useEffect(() => {
     const checkout = searchParams.get("checkout");
     if (checkout === "success") {
-      toast.success("Subscription updated");
+      toast.success("Payment received -- activating your plan...");
       router.replace("/dashboard/billing");
+      void pollForPlanChange(currentPlan);
     } else if (checkout === "canceled") {
       toast.info("Checkout canceled");
       router.replace("/dashboard/billing");
@@ -88,7 +103,8 @@ function BillingContent() {
   async function handleCancel() {
     try {
       await cancelSubscription.mutateAsync();
-      toast.success("Subscription canceled -- you're back on the Free plan");
+      toast.success("Subscription canceled -- switching you back to the Free plan...");
+      void pollForPlanChange(currentPlan);
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Could not cancel subscription");
     }

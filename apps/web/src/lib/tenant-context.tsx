@@ -12,6 +12,7 @@ interface TenantContextValue {
   activeRole: TenantWithRole["role"] | null;
   isLoading: boolean;
   setActiveTenantId: (id: string) => void;
+  refetchTenants: () => Promise<TenantWithRole[]>;
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null);
@@ -25,11 +26,16 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setActiveTenantIdState(localStorage.getItem("active_tenant_id"));
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["tenants"],
     queryFn: () => apiFetch<Paginated<TenantWithRole>>("/tenants", { query: { limit: "100" } }),
     enabled: Boolean(user),
   });
+
+  async function refetchTenants(): Promise<TenantWithRole[]> {
+    const result = await refetch();
+    return result.data?.list ?? [];
+  }
 
   const tenants = useMemo(() => data?.list ?? [], [data]);
 
@@ -56,6 +62,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         activeRole: activeTenant?.role ?? null,
         isLoading,
         setActiveTenantId,
+        refetchTenants,
       }}
     >
       {children}

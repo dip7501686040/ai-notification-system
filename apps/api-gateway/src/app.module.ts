@@ -21,6 +21,7 @@ import { BillingController } from "./tenants/billing.controller";
 import { StripeWebhookController } from "./webhooks/stripe-webhook.controller";
 import { NotificationsGateway } from "./notifications/notifications.gateway";
 import { NotificationPushConsumerService } from "./notifications/notification-push-consumer.service";
+import { NotificationStatusPushConsumerService } from "./notifications/notification-status-push-consumer.service";
 import { AiController } from "./ai/ai.controller";
 import { GrpcAuthGuard } from "./auth/grpc-auth.guard";
 import { ApiKeyRateLimiterService } from "./auth/api-key-rate-limiter.service";
@@ -48,6 +49,7 @@ const controllers: Type<unknown>[] = [
 const providers: Type<unknown>[] = [
   NotificationsGateway,
   NotificationPushConsumerService,
+  NotificationStatusPushConsumerService,
   GrpcAuthGuard,
   ApiKeyRateLimiterService,
 ];

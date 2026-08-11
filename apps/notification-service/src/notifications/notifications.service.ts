@@ -12,6 +12,7 @@ const NOTIFICATION_SEARCHABLE_FIELDS = ["channel", "target", "status"];
 const EXCHANGE = "platform";
 const DASHBOARD_CHANNEL = "dashboard";
 const NOTIFICATION_CREATED_ROUTING_KEY = "notification.created";
+const NOTIFICATION_STATUS_UPDATED_ROUTING_KEY = "notification.status.updated";
 
 interface RuleAction {
   channel: string;
@@ -280,11 +281,32 @@ export class NotificationsService extends BaseCrudService<
     data: Prisma.NotificationUpdateInput,
   ): Promise<void> {
     try {
-      await super.update({ id: notificationId }, data);
+      const notification = await super.update({ id: notificationId }, data);
+      await this.publishStatusUpdated(notification);
     } catch (err) {
       this.logger.error(
         { err, notificationId },
         "Failed to apply dispatch outcome to notification",
+      );
+    }
+  }
+
+  // Lets the dashboard reflect a status change (pending -> sent/retrying/
+  // dead_letter) live instead of only on next reload -- api-gateway relays
+  // this straight to the tenant's socket room under its own event name
+  // (not the "new notification" one), so the frontend can quietly refetch
+  // instead of toasting a status change as if it were a new notification.
+  private async publishStatusUpdated(notification: Notification): Promise<void> {
+    try {
+      await this.rabbitmq.publish(EXCHANGE, NOTIFICATION_STATUS_UPDATED_ROUTING_KEY, {
+        notificationId: notification.id,
+        tenantId: notification.tenantId,
+        status: notification.status,
+      });
+    } catch (err) {
+      this.logger.error(
+        { err, notificationId: notification.id },
+        "Failed to publish notification.status.updated",
       );
     }
   }
