@@ -1,0 +1,6 @@
+healthGrpcPort: 50058
+# No app-facing gRPC port — channel-service is a pure RabbitMQ worker.
+appGrpcPort: null
+
+database:
+  enabled: false

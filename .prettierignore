@@ -5,3 +5,7 @@ build
 coverage
 pnpm-lock.yaml
 readme.md
+
+# Helm chart templates use Go template syntax ({{ }}) inside YAML/tpl files,
+# which prettier's YAML parser can't parse as valid YAML.
+infra/k8s/charts/**/templates/

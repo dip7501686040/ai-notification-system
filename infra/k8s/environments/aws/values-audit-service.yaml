@@ -1,0 +1,7 @@
+healthGrpcPort: 50061
+appGrpcPort: 50161
+appGrpcPortEnvName: AUDIT_GRPC_PORT
+
+database:
+  enabled: true
+  name: audit_db

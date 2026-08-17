@@ -1,0 +1,2 @@
+# No AWS-specific overrides beyond chart defaults — image.repository/tag are
+# supplied via --set at deploy time from the real Terraform ECR output.

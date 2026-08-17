@@ -1,0 +1,5 @@
+healthGrpcPort: 50051
+httpPort: 8000
+
+database:
+  enabled: false

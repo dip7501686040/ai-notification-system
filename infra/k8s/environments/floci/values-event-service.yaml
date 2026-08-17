@@ -1,0 +1,11 @@
+image:
+  repository: ai-notification/event-service
+  tag: dev
+
+healthGrpcPort: 50054
+appGrpcPort: 50154
+appGrpcPortEnvName: EVENT_GRPC_PORT
+
+database:
+  enabled: true
+  name: event_db

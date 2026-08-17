@@ -14,3 +14,23 @@ coverage/
 .venv/
 __pycache__/
 *.pyc
+
+# Terraform
+.terraform/
+.terraform-*/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+infra/terraform/secrets.*.tfvars
+infra/terraform/envs/state/
+
+# Kubernetes secrets (kubectl create secret --from-env-file input)
+infra/k8s/secrets/*.env
+!infra/k8s/secrets/*.env.example
+
+# Local-only dev config (Floci AWS profile) — machine-specific, not secrets
+# but not meant to be shared/committed either.
+infra/local/
