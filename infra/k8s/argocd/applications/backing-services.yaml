@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backing-services
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dip7501686040/ai-notification-system.git
+    targetRevision: infra/floci-gitops
+    path: infra/k8s/charts/backing-services
+    # Floci uses chart defaults (cluster-default local-path StorageClass).
+    # For AWS, override at apply time with:
+    #   -f infra/k8s/environments/aws/values-backing-services.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-notification
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

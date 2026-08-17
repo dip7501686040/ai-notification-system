@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prediction-service
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/dip7501686040/ai-notification-system.git
+      targetRevision: infra/floci-gitops
+      path: infra/k8s/charts/prediction-service
+      helm:
+        releaseName: prediction-service
+        valueFiles:
+          - $values/infra/k8s/environments/floci/values-prediction-service.yaml
+    - repoURL: https://github.com/dip7501686040/ai-notification-system.git
+      targetRevision: infra/floci-gitops
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-notification
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
