@@ -1,3 +1,9 @@
+image:
+  # TODO: replace with the real ECR URL once real-AWS Terraform is applied
+  # (see infra/terraform outputs.ecr_repository_urls).
+  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/event-service
+  tag: unset
+
 healthGrpcPort: 50054
 appGrpcPort: 50154
 appGrpcPortEnvName: EVENT_GRPC_PORT

@@ -1,2 +1,5 @@
-# No AWS-specific overrides beyond chart defaults — image.repository/tag are
-# supplied via --set at deploy time from the real Terraform ECR output.
+image:
+  # TODO: replace with the real ECR URL once real-AWS Terraform is applied
+  # (see infra/terraform outputs.ecr_repository_urls).
+  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/prediction-service
+  tag: unset

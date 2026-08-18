@@ -16,6 +16,14 @@ node_max_size       = 1
 # cert lookup) can't be validated locally — keep addons off for this pass.
 enable_irsa_addons = false
 
+# Path A/B test in progress (see plan §0) — "ec2" until proven otherwise
+# against Floci's EC2 emulation; switch to "docker" if nested Docker
+# inside Floci's EC2-emulation container doesn't work.
+jenkins_mode          = "ec2"
+jenkins_instance_type = "t3.medium"
+# Disposable local-only pass — open is fine here, never for the AWS env.
+jenkins_admin_cidr = "0.0.0.0/0"
+
 tags = {
   Project     = "ai-notification-system"
   Environment = "floci"

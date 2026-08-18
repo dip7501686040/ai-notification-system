@@ -1,0 +1,52 @@
+#!/bin/bash
+set -uxo pipefail
+
+log() { echo "[bootstrap] $*"; }
+
+# Real AWS EC2 instances boot with systemd as PID 1; Floci's EC2 emulation
+# runs the "instance" as a plain container with no init system. Same script
+# either way — just fall back to launching services directly when systemd
+# isn't available, confirmed empirically against Floci (see infra/terraform
+# plan history: nested dockerd runs fine there, just without systemd).
+has_systemd() {
+  [ -d /run/systemd/system ]
+}
+
+# --- Base tools ---
+dnf install -y aws-cli
+
+# --- Docker ---
+dnf install -y docker
+if has_systemd; then
+  systemctl enable --now docker
+else
+  log "no systemd — starting dockerd directly"
+  nohup dockerd >/var/log/dockerd.log 2>&1 &
+  for _ in $(seq 1 30); do
+    [ -S /var/run/docker.sock ] && break
+    sleep 1
+  done
+fi
+
+# --- Jenkins ---
+dnf install -y java-21-amazon-corretto wget git
+wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+dnf install -y jenkins
+
+# Let Jenkins run docker builds without sudo.
+usermod -aG docker jenkins || true
+
+if has_systemd; then
+  systemctl enable --now jenkins
+else
+  log "no systemd — starting jenkins directly"
+  # Hardcoded rather than located with `find`: this minimal image doesn't
+  # even have findutils installed, and this is the RPM's fixed install path
+  # (confirmed via `rpm -ql jenkins`), not something that varies by host.
+  JENKINS_WAR=/usr/share/java/jenkins.war
+  mkdir -p /var/lib/jenkins
+  chown jenkins:jenkins /var/lib/jenkins
+  JENKINS_HOME=/var/lib/jenkins nohup runuser -u jenkins -- java -jar "$JENKINS_WAR" --httpPort=8080 \
+    >/var/log/jenkins.log 2>&1 &
+fi

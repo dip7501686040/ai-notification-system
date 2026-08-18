@@ -66,6 +66,32 @@ variable "enable_irsa_addons" {
   default     = false
 }
 
+variable "jenkins_mode" {
+  description = <<-EOT
+    "ec2" runs Jenkins on a Terraform-provisioned EC2 instance (used on real
+    AWS always). "docker" runs Jenkins as a plain container on the local
+    Docker daemon via the kreuzwerker/docker provider — a Floci-only
+    fallback if Floci's EC2 emulation can't run a nested Docker daemon.
+  EOT
+  type        = string
+  default     = "ec2"
+
+  validation {
+    condition     = contains(["ec2", "docker"], var.jenkins_mode)
+    error_message = "jenkins_mode must be \"ec2\" or \"docker\"."
+  }
+}
+
+variable "jenkins_instance_type" {
+  type    = string
+  default = "t3.medium"
+}
+
+variable "jenkins_admin_cidr" {
+  description = "CIDR allowed to reach the Jenkins EC2 instance's SSH/UI ports. No default — set consciously (0.0.0.0/0 is fine only for the disposable Floci pass)."
+  type        = string
+}
+
 variable "ecr_repository_names" {
   description = "Names of the application images to create ECR repositories for"
   type        = list(string)

@@ -1,0 +1,174 @@
+// CI only — builds and pushes images, then bumps each service's image.tag
+// in infra/k8s/environments/<env>/values-<service>.yaml and pushes that
+// commit. ArgoCD's existing auto-sync (see infra/k8s/argocd) picks up the
+// change and does the actual deploy — this pipeline never touches the
+// cluster directly.
+//
+// Concurrency is capped at 2 by construction: SERVICE_CATALOG is processed
+// in batches of at most 2, run sequentially, one `parallel` block per
+// batch — not a plugin-based throttle, to avoid adding another external
+// Jenkins dependency (see infra/terraform plan history: this project has
+// hit enough external-dependency walls already this session).
+
+def SERVICE_CATALOG = [
+  'identity-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/identity-service', APP_DIR: 'identity-service'],
+  ],
+  'tenant-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/tenant-service', APP_DIR: 'tenant-service'],
+  ],
+  'event-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/event-service', APP_DIR: 'event-service'],
+  ],
+  'rule-engine-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/rule-engine-service', APP_DIR: 'rule-engine-service'],
+  ],
+  'template-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/template-service', APP_DIR: 'template-service'],
+  ],
+  'notification-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/notification-service', APP_DIR: 'notification-service'],
+  ],
+  'channel-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/channel-service', APP_DIR: 'channel-service'],
+  ],
+  'ai-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/ai-service', APP_DIR: 'ai-service'],
+  ],
+  'analytics-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/analytics-service', APP_DIR: 'analytics-service'],
+  ],
+  'audit-service': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/audit-service', APP_DIR: 'audit-service'],
+  ],
+  'api-gateway': [
+    dockerfile: 'docker/nest-service.Dockerfile', context: '.',
+    buildArgs: [APP_NAME: '@ai-notification/api-gateway', APP_DIR: 'api-gateway'],
+  ],
+  // web is deliberately last in the batch order below — its
+  // NEXT_PUBLIC_API_URL build-arg is baked in at image build time and
+  // should point at api-gateway's real external URL once one exists.
+  'web': [
+    dockerfile: 'docker/web-service.Dockerfile', context: '.',
+    buildArgs: [NEXT_PUBLIC_API_URL: params.WEB_API_URL ?: 'http://localhost:8000'],
+  ],
+  'prediction-service': [
+    dockerfile: 'apps/prediction-service/Dockerfile', context: 'apps/prediction-service',
+    buildArgs: [:],
+  ],
+]
+
+// Pairs of at most 2, no service depends on another's build finishing
+// first (image builds are independent — this ordering just keeps the
+// same overall sequence as the original rollout plan, not a hard
+// requirement for CI itself).
+def BATCHES = [
+  ['identity-service', 'tenant-service'],
+  ['event-service', 'rule-engine-service'],
+  ['template-service', 'notification-service'],
+  ['channel-service', 'ai-service'],
+  ['analytics-service', 'audit-service'],
+  ['api-gateway', 'web'],
+  ['prediction-service'],
+]
+
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['floci', 'aws'], description: 'Which infra/k8s/environments/<env> to update')
+    string(name: 'SERVICES', defaultValue: 'identity-service', description: 'Comma-separated service names, or "all"')
+    string(name: 'WEB_API_URL', defaultValue: '', description: 'Overrides web\'s NEXT_PUBLIC_API_URL build-arg')
+  }
+
+  environment {
+    GIT_SHA = "${GIT_COMMIT.take(8)}"
+  }
+
+  stages {
+    stage('Load environment') {
+      steps {
+        // Plain shell parsing rather than the readProperties step, to avoid
+        // needing the pipeline-utility-steps plugin on top of the minimal
+        // plugin set (Pipeline, Git, Credentials Binding) this setup needs.
+        script {
+          def propsFile = "infra/jenkins/env/${params.ENVIRONMENT}.properties"
+          env.AWS_REGION   = sh(script: "grep '^AWS_REGION='   ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.ECR_REGISTRY = sh(script: "grep '^ECR_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.K8S_ENV       = sh(script: "grep '^K8S_ENV='      ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+        }
+      }
+    }
+
+    stage('ECR login') {
+      steps {
+        sh 'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
+      }
+    }
+
+    stage('Build + push (batched, max 2 parallel)') {
+      steps {
+        script {
+          def requested = params.SERVICES.trim() == 'all'
+            ? SERVICE_CATALOG.keySet()
+            : params.SERVICES.split(',').collect { it.trim() }
+
+          for (batch in BATCHES) {
+            def toBuild = batch.findAll { requested.contains(it) }
+            if (toBuild.isEmpty()) {
+              continue
+            }
+
+            def branches = [:]
+            for (svc in toBuild) {
+              def name = svc
+              def cfg = SERVICE_CATALOG[name]
+              branches[name] = {
+                def image = "${env.ECR_REGISTRY}/${name}:${env.GIT_SHA}"
+                def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}='${v}'" }.join(' ')
+                sh """
+                  docker build -f ${cfg.dockerfile} ${buildArgFlags} -t ${image} ${cfg.context}
+                  docker push ${image}
+                """
+                def valuesFile = "infra/k8s/environments/${env.K8S_ENV}/values-${name}.yaml"
+                sh """
+                  sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${name}|" ${valuesFile}
+                  sed -i "s|^\\(\\s*tag:\\).*|\\1 \\"${env.GIT_SHA}\\"|" ${valuesFile}
+                """
+              }
+            }
+            parallel branches
+
+            sh """
+              git add ${toBuild.collect { "infra/k8s/environments/${env.K8S_ENV}/values-${it}.yaml" }.join(' ')}
+              git -c user.name=jenkins -c user.email=jenkins@ai-notification.local \
+                commit -m "ci: bump image tag for ${toBuild.join(', ')} to \${GIT_SHA}"
+            """
+          }
+        }
+      }
+    }
+
+    stage('Push tag-bump commits') {
+      steps {
+        // Credential added once, manually, through the Jenkins UI after
+        // bootstrap — deliberately not provisioned by Terraform (see plan).
+        withCredentials([usernamePassword(credentialsId: 'github-push', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+          sh '''
+            git push "https://${GIT_USER}:${GIT_TOKEN}@github.com/dip7501686040/ai-notification-system.git" HEAD:infra/floci-gitops
+          '''
+        }
+      }
+    }
+  }
+}
