@@ -161,11 +161,26 @@ pipeline {
 
     stage('Push tag-bump commits') {
       steps {
-        // Credential added once, manually, through the Jenkins UI after
-        // bootstrap — deliberately not provisioned by Terraform (see plan).
+        // github-push credential is seeded automatically into the instance's
+        // credential store at boot (see infra/terraform/modules/jenkins-ec2's
+        // init.groovy.d script) — nothing manual needed here.
+        //
+        // Rebase-and-retry rather than a bare push: this branch can move
+        // between checkout and push (another build, or a human pushing
+        // directly), so a bare push racing that would fail outright.
         withCredentials([usernamePassword(credentialsId: 'github-push', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
           sh '''
-            git push "https://${GIT_USER}:${GIT_TOKEN}@github.com/dip7501686040/ai-notification-system.git" HEAD:infra/floci-gitops
+            REMOTE="https://${GIT_USER}:${GIT_TOKEN}@github.com/dip7501686040/ai-notification-system.git"
+            for attempt in 1 2 3 4 5; do
+              if git push "$REMOTE" HEAD:infra/floci-gitops; then
+                exit 0
+              fi
+              echo "push rejected (attempt $attempt) — rebasing onto latest infra/floci-gitops and retrying"
+              git fetch "$REMOTE" infra/floci-gitops
+              git rebase FETCH_HEAD
+            done
+            echo "push still failing after 5 attempts"
+            exit 1
           '''
         }
       }
