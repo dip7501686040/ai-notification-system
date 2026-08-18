@@ -179,3 +179,16 @@ variable "google_client_secret" {
   sensitive = true
   default   = ""
 }
+
+variable "github_push_username" {
+  description = "GitHub username Jenkins pushes tag-bump commits as"
+  type        = string
+  default     = ""
+}
+
+variable "github_push_token" {
+  description = "GitHub PAT Jenkins uses to push tag-bump commits — seeded into the Jenkins credential store at boot"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

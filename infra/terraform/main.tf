@@ -44,9 +44,11 @@ module "jenkins_ec2" {
   count  = var.jenkins_mode == "ec2" ? 1 : 0
   source = "./modules/jenkins-ec2"
 
-  instance_type = var.jenkins_instance_type
-  admin_cidr    = var.jenkins_admin_cidr
-  vpc_id        = module.network.vpc_id
-  subnet_id     = module.network.public_subnet_ids[0]
-  tags          = var.tags
+  instance_type        = var.jenkins_instance_type
+  admin_cidr           = var.jenkins_admin_cidr
+  vpc_id               = module.network.vpc_id
+  subnet_id            = module.network.public_subnet_ids[0]
+  github_push_username = var.github_push_username
+  github_push_token    = var.github_push_token
+  tags                 = var.tags
 }

@@ -24,6 +24,20 @@ resource "local_sensitive_file" "jenkins_ssh_key" {
   file_permission = "0600"
 }
 
+# Generated so the instance never needs the interactive setup wizard or a
+# fetch-from-instance initialAdminPassword dance — admin/<this> works the
+# moment Jenkins is up.
+resource "random_password" "jenkins_admin" {
+  length  = 24
+  special = false
+}
+
+resource "local_sensitive_file" "jenkins_admin_password" {
+  content         = random_password.jenkins_admin.result
+  filename        = "${path.root}/envs/state/jenkins-admin-password.txt"
+  file_permission = "0600"
+}
+
 resource "aws_security_group" "jenkins" {
   name        = "jenkins-ec2"
   description = "Jenkins CI instance: SSH + web UI from admin_cidr only"
@@ -126,7 +140,14 @@ resource "aws_instance" "jenkins" {
   key_name                    = aws_key_pair.jenkins.key_name
   associate_public_ip_address = true
 
-  user_data = file("${path.module}/templates/bootstrap.sh.tftpl")
+  user_data = templatefile("${path.module}/templates/bootstrap.sh.tftpl", {
+    admin_password = random_password.jenkins_admin.result
+    init_security_groovy = templatefile("${path.module}/templates/init-security.groovy.tftpl", {
+      admin_password       = random_password.jenkins_admin.result
+      github_push_username = var.github_push_username
+      github_push_token    = var.github_push_token
+    })
+  })
 
   tags = merge(var.tags, { Name = "jenkins-ec2" })
 }

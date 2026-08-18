@@ -20,3 +20,15 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "github_push_username" {
+  type    = string
+  default = ""
+}
+
+variable "github_push_token" {
+  description = "GitHub PAT Jenkins uses to push tag-bump commits — seeded into the instance's Jenkins credential store at boot via init.groovy.d. Empty string skips seeding the credential."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

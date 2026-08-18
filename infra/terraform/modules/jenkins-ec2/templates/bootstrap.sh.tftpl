@@ -17,6 +17,17 @@ dnf install -y aws-cli
 
 # --- Docker ---
 dnf install -y docker
+
+# Floci's own ECR emulation serves plain HTTP on the Docker bridge network
+# (real AWS ECR is always HTTPS, so this never matches there — harmless on
+# real AWS, needed for Floci's push/pull to work at all).
+mkdir -p /etc/docker
+cat >/etc/docker/daemon.json <<'DAEMON_JSON'
+{
+  "insecure-registries": ["172.17.0.0/16"]
+}
+DAEMON_JSON
+
 if has_systemd; then
   systemctl enable --now docker
 else
@@ -29,24 +40,94 @@ else
 fi
 
 # --- Jenkins ---
-dnf install -y java-21-amazon-corretto wget git
-wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+# Installed as separate dnf transactions, not one combined
+# `dnf install -y java wget git` — a single failed dependency (e.g. an
+# optional X11 lib pulled in by the JDK, unneeded on a headless box) fails
+# the *whole* transaction atomically, blocking wget/git too even though
+# they have nothing to do with it. --setopt=install_weak_deps=False on the
+# JDK install skips exactly that kind of unneeded weak dependency.
+dnf install -y wget git
+dnf install -y --setopt=install_weak_deps=False java-21-amazon-corretto
+wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/rpm-stable/jenkins.repo
+rpm --import https://pkg.jenkins.io/rpm-stable/jenkins.io-2023.key
 dnf install -y jenkins
 
 # Let Jenkins run docker builds without sudo.
 usermod -aG docker jenkins || true
 
+JENKINS_HOME=/var/lib/jenkins
+JENKINS_WAR=/usr/share/java/jenkins.war
+mkdir -p "$JENKINS_HOME/init.groovy.d" "$JENKINS_HOME/jobs/build-service" "$JENKINS_HOME/plugins"
+
+# --- Pre-install plugins BEFORE Jenkins ever boots ---
+# Both the job config.xml (git/workflow-job plugin classes) and the
+# credential-seeding init.groovy.d script (credentials-impl classes) get
+# deserialized/compiled during Jenkins' own early init sequence — which
+# happens before any post-boot REST API call could install plugins. So
+# plugins have to already be on disk in $JENKINS_HOME/plugins by the time
+# Jenkins starts, not installed afterward (confirmed empirically: a
+# post-boot REST install left both the job and the credential-creation
+# script failing with "unable to resolve class"/XStream deserialization
+# errors, since neither plugin was loaded yet at the point they're needed).
+PLUGIN_MANAGER_JAR=/tmp/jenkins-plugin-manager.jar
+PLUGIN_MANAGER_URL=$(curl -s https://api.github.com/repos/jenkinsci/plugin-installation-manager-tool/releases/latest | grep -o '"browser_download_url": *"[^"]*\.jar"' | cut -d'"' -f4)
+wget -O "$PLUGIN_MANAGER_JAR" "$PLUGIN_MANAGER_URL"
+java -jar "$PLUGIN_MANAGER_JAR" --war "$JENKINS_WAR" \
+  --plugin-download-directory "$JENKINS_HOME/plugins" \
+  --plugins git workflow-aggregator credentials-binding credentials
+
+# --- Configuration as Code: skip the setup wizard, seed the admin
+# account and (if provided) the git push credential, and pre-seed the
+# pipeline job — so every fresh instance is immediately ready for CI with
+# zero manual setup, rather than needing the plugin/job/credential dance
+# redone by hand after every recreation.
+cat >"$JENKINS_HOME/init.groovy.d/basic-security.groovy" <<'INIT_GROOVY'
+${init_security_groovy}
+INIT_GROOVY
+
+cat >"$JENKINS_HOME/jobs/build-service/config.xml" <<'JOB_CONFIG_XML'
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <description>CI: build/push service images and bump image tags in git</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>https://github.com/dip7501686040/ai-notification-system.git</url>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches>
+        <hudson.plugins.git.BranchSpec>
+          <name>*/infra/floci-gitops</name>
+        </hudson.plugins.git.BranchSpec>
+      </branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <extensions/>
+    </scm>
+    <scriptPath>infra/jenkins/Jenkinsfile</scriptPath>
+    <lightweight>true</lightweight>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
+JOB_CONFIG_XML
+
+chown -R jenkins:jenkins "$JENKINS_HOME"
+
+JAVA_OPTS_COMMON="-Djenkins.install.runSetupWizard=false"
+
 if has_systemd; then
+  mkdir -p /etc/sysconfig
+  if [ -f /etc/sysconfig/jenkins ]; then
+    sed -i "s|^JENKINS_JAVA_OPTIONS=.*|JENKINS_JAVA_OPTIONS=\"$JAVA_OPTS_COMMON\"|" /etc/sysconfig/jenkins
+  fi
   systemctl enable --now jenkins
 else
   log "no systemd — starting jenkins directly"
-  # Hardcoded rather than located with `find`: this minimal image doesn't
-  # even have findutils installed, and this is the RPM's fixed install path
-  # (confirmed via `rpm -ql jenkins`), not something that varies by host.
-  JENKINS_WAR=/usr/share/java/jenkins.war
-  mkdir -p /var/lib/jenkins
-  chown jenkins:jenkins /var/lib/jenkins
-  JENKINS_HOME=/var/lib/jenkins nohup runuser -u jenkins -- java -jar "$JENKINS_WAR" --httpPort=8080 \
+  JENKINS_HOME=$JENKINS_HOME nohup runuser -u jenkins -- java $JAVA_OPTS_COMMON -jar "$JENKINS_WAR" --httpPort=8080 \
     >/var/log/jenkins.log 2>&1 &
 fi
