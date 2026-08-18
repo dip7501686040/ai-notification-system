@@ -32,3 +32,19 @@ variable "github_push_token" {
   sensitive   = true
   default     = ""
 }
+
+variable "service_names" {
+  description = "One pre-configured, one-click build-<service> job is seeded per name at boot, in addition to the generic parameterized build-service job."
+  type        = list(string)
+  default     = []
+}
+
+variable "git_repo_url" {
+  type    = string
+  default = "https://github.com/dip7501686040/ai-notification-system.git"
+}
+
+variable "git_branch" {
+  type    = string
+  default = "infra/floci-gitops"
+}

@@ -57,18 +57,17 @@ usermod -aG docker jenkins || true
 
 JENKINS_HOME=/var/lib/jenkins
 JENKINS_WAR=/usr/share/java/jenkins.war
-mkdir -p "$JENKINS_HOME/init.groovy.d" "$JENKINS_HOME/jobs/build-service" "$JENKINS_HOME/plugins"
+mkdir -p "$JENKINS_HOME/init.groovy.d" "$JENKINS_HOME/plugins"
 
 # --- Pre-install plugins BEFORE Jenkins ever boots ---
-# Both the job config.xml (git/workflow-job plugin classes) and the
-# credential-seeding init.groovy.d script (credentials-impl classes) get
-# deserialized/compiled during Jenkins' own early init sequence — which
-# happens before any post-boot REST API call could install plugins. So
-# plugins have to already be on disk in $JENKINS_HOME/plugins by the time
-# Jenkins starts, not installed afterward (confirmed empirically: a
-# post-boot REST install left both the job and the credential-creation
-# script failing with "unable to resolve class"/XStream deserialization
-# errors, since neither plugin was loaded yet at the point they're needed).
+# The job-seeding script (WorkflowJob/GitSCM classes) and the
+# credential-seeding script (credentials-impl classes) both get
+# compiled/executed during Jenkins' own early init sequence — before any
+# post-boot REST API call could install plugins. So plugins have to
+# already be on disk in $JENKINS_HOME/plugins by the time Jenkins starts,
+# not installed afterward (confirmed empirically: a post-boot REST
+# install left both failing with "unable to resolve class" errors, since
+# neither plugin was loaded yet at the point they're needed).
 PLUGIN_MANAGER_JAR=/tmp/jenkins-plugin-manager.jar
 PLUGIN_MANAGER_URL=$(curl -s https://api.github.com/repos/jenkinsci/plugin-installation-manager-tool/releases/latest | grep -o '"browser_download_url": *"[^"]*\.jar"' | cut -d'"' -f4)
 wget -O "$PLUGIN_MANAGER_JAR" "$PLUGIN_MANAGER_URL"
@@ -77,44 +76,23 @@ java -jar "$PLUGIN_MANAGER_JAR" --war "$JENKINS_WAR" \
   --plugins git workflow-aggregator credentials-binding credentials
 
 # --- Configuration as Code: skip the setup wizard, seed the admin
-# account and (if provided) the git push credential, and pre-seed the
-# pipeline job — so every fresh instance is immediately ready for CI with
-# zero manual setup, rather than needing the plugin/job/credential dance
-# redone by hand after every recreation.
+# account and (if provided) the git push credential, and pre-seed one
+# generic + one per-service pipeline job — so every fresh instance is
+# immediately ready for CI with zero manual setup, rather than needing
+# the plugin/job/credential dance redone by hand after every recreation.
+#
+# Jobs are created programmatically (Groovy, via Jenkins' own item API)
+# rather than as pre-rendered config.xml files: with one job per service
+# (13+), embedding full XML for each blows past EC2's 16KB user_data
+# limit — a real AWS constraint, not a Floci-only workaround — while a
+# Groovy loop stays a fixed, small size regardless of service count.
 cat >"$JENKINS_HOME/init.groovy.d/basic-security.groovy" <<'INIT_GROOVY'
 ${init_security_groovy}
 INIT_GROOVY
 
-cat >"$JENKINS_HOME/jobs/build-service/config.xml" <<'JOB_CONFIG_XML'
-<?xml version='1.1' encoding='UTF-8'?>
-<flow-definition plugin="workflow-job">
-  <description>CI: build/push service images and bump image tags in git</description>
-  <keepDependencies>false</keepDependencies>
-  <properties/>
-  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
-    <scm class="hudson.plugins.git.GitSCM" plugin="git">
-      <configVersion>2</configVersion>
-      <userRemoteConfigs>
-        <hudson.plugins.git.UserRemoteConfig>
-          <url>https://github.com/dip7501686040/ai-notification-system.git</url>
-        </hudson.plugins.git.UserRemoteConfig>
-      </userRemoteConfigs>
-      <branches>
-        <hudson.plugins.git.BranchSpec>
-          <name>*/infra/floci-gitops</name>
-        </hudson.plugins.git.BranchSpec>
-      </branches>
-      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
-      <submoduleCfg class="empty-list"/>
-      <extensions/>
-    </scm>
-    <scriptPath>infra/jenkins/Jenkinsfile</scriptPath>
-    <lightweight>true</lightweight>
-  </definition>
-  <triggers/>
-  <disabled>false</disabled>
-</flow-definition>
-JOB_CONFIG_XML
+cat >"$JENKINS_HOME/init.groovy.d/seed-jobs.groovy" <<'SEED_JOBS_GROOVY'
+${seed_jobs_groovy}
+SEED_JOBS_GROOVY
 
 chown -R jenkins:jenkins "$JENKINS_HOME"
 

@@ -50,5 +50,6 @@ module "jenkins_ec2" {
   subnet_id            = module.network.public_subnet_ids[0]
   github_push_username = var.github_push_username
   github_push_token    = var.github_push_token
+  service_names        = var.ecr_repository_names
   tags                 = var.tags
 }

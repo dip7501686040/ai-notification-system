@@ -147,6 +147,11 @@ resource "aws_instance" "jenkins" {
       github_push_username = var.github_push_username
       github_push_token    = var.github_push_token
     })
+    seed_jobs_groovy = templatefile("${path.module}/templates/seed-jobs.groovy.tftpl", {
+      git_repo_url         = var.git_repo_url
+      git_branch           = var.git_branch
+      services_groovy_list = join(", ", [for s in var.service_names : "\"${s}\""])
+    })
   })
 
   tags = merge(var.tags, { Name = "jenkins-ec2" })
