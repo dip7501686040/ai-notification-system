@@ -107,6 +107,16 @@ pipeline {
           env.ECR_REGISTRY = sh(script: "grep '^ECR_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           env.K8S_ENV       = sh(script: "grep '^K8S_ENV='      ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
         }
+        // Local (not --global) repo config, set once — needed by every git
+        // operation that creates a commit, including the rebase replay in
+        // the push-retry loop below, not just the explicit `git commit`
+        // call (confirmed: a per-command `-c user.name=...` on just the
+        // commit step left `git rebase` with no identity when a concurrent
+        // push forced a retry, failing with "unable to auto-detect email").
+        sh '''
+          git config user.name jenkins
+          git config user.email jenkins@ai-notification.local
+        '''
       }
     }
 
@@ -151,8 +161,7 @@ pipeline {
 
             sh """
               git add ${toBuild.collect { "infra/k8s/environments/${env.K8S_ENV}/values-${it}.yaml" }.join(' ')}
-              git -c user.name=jenkins -c user.email=jenkins@ai-notification.local \
-                commit -m "ci: bump image tag for ${toBuild.join(', ')} to \${GIT_SHA}"
+              git commit -m "ci: bump image tag for ${toBuild.join(', ')} to \${GIT_SHA}"
             """
           }
         }
