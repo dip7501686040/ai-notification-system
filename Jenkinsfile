@@ -57,7 +57,12 @@ pipeline {
                 node:24 sh -c '
                   corepack enable
                   pnpm config set store-dir /pnpm-store
-                  pnpm dlx turbo@2.3.0 run build --filter="...[${baseSha}]" --dry=json
+                  # Must track package.json's own "turbo": "^2.3.0" range, not
+                  # a hard pin -- 2.3.0 exactly predates the top-level
+                  # `concurrency` key this repo's turbo.json already uses,
+                  # so a pinned dlx install fails to parse it even though a
+                  # real `pnpm install` here resolves it fine.
+                  pnpm dlx turbo@^2.3.0 run build --filter="...[${baseSha}]" --dry=json
                 '
             """,
             returnStdout: true
