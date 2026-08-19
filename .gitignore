@@ -15,9 +15,5 @@ coverage/
 __pycache__/
 *.pyc
 
-# Terraform and k8s deploy manifests now live in the platform-gitops repo,
-# not here — see infra/README.md.
-
-# Local-only dev config (Floci AWS profile) — machine-specific, not secrets
-# but not meant to be shared/committed either.
-infra/local/
+# Terraform, k8s deploy manifests, and the Floci local-dev env pointer now
+# live in the platform-gitops repo, not here — see infra/README.md.
