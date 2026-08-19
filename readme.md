@@ -6,89 +6,6 @@ Built as a full production-style system, not a toy demo — 11 NestJS microservi
 
 For the full problem definition, requirements, and architecture rationale, see **[docs/SRS.md](docs/SRS.md)** (Software Requirements Specification).
 
-## Architecture at a glance
-
-The core pipeline is asynchronous, RabbitMQ-driven event choreography — each service publishes a routing-keyed event on completion and reacts only to the events it cares about, with no service calling the next one directly. Auth, multi-tenancy, and template rendering are the exception: those are synchronous gRPC calls, made where a request genuinely needs an answer before it can proceed.
-
-```
-Client / API key
-      │ REST
-      ▼
- api-gateway ──gRPC──► identity-service   (JWT / API-key auth)
-      │       ──gRPC──► tenant-service     (multi-tenancy, membership, API keys)
-      │  gRPC: createEvent
-      ▼
- event-service ──publish──► event.created
-                                  │
-                                  ▼
-                        rule-engine-service (evaluate rules)
-                                  │ publish
-                                  ▼
-                         event.rule.matched
-                                  │
-                                  ▼
-                             ai-service (LLM: severity / impact / duplicate)
-                                  │ publish
-                                  ▼
-                         event.ai.completed
-                                  │
-                                  ▼
-                       notification-service ──gRPC──► template-service (render)
-                                  │            ──gRPC──► tenant-service (membership)
-                                  │ publish
-                                  ▼
-                        notification.created
-                                  │
-                                  ▼
-                          channel-service (email / webhook / dashboard delivery)
-                                  │ publish
-                                  ▼
-                          notification.sent
-
- Parallel async taps (data collection, not in the critical path):
-   event.created, event.ai.completed, notification.sent ──► audit-service     (who did what, when)
-   event.created, notification.sent                      ──► analytics-service (aggregates)
-
- Every service ──► OpenTelemetry ──► Prometheus / Loki / Jaeger ──► Grafana ──► tenant "Observability" tab
-```
-
-**Services** (`apps/`): `identity-service`, `tenant-service`, `event-service`, `rule-engine-service`, `notification-service`, `channel-service`, `ai-service`, `analytics-service`, `audit-service`, `api-gateway`, `template-service`, `web` (Next.js), `prediction-service` (Python).
-
-**Shared libraries** (`packages/`): `common`, `config`, `grpc`, `logger`, `rabbitmq`, `telemetry`, `typescript-config` — a pnpm + Turborepo monorepo.
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Backend | NestJS, gRPC, Prisma, PostgreSQL, RabbitMQ |
-| Frontend | Next.js |
-| AI | OpenAI / Anthropic-backed event analysis |
-| Observability | OpenTelemetry, Prometheus, Loki, Jaeger, Grafana, cAdvisor |
-| Monorepo tooling | pnpm workspaces, Turborepo (dependency-graph-aware builds) |
-| Infra / CI-CD | Terraform, Kubernetes + Helm, ArgoCD (GitOps), Jenkins, Docker |
-| Local AWS emulation | [Floci](https://github.com/floci/floci) — EC2/ECR/EKS as real Docker containers, no AWS account needed |
-
-## Repository structure
-
-```
-apps/            13 services (see above)
-packages/        shared libraries
-docker/          Dockerfiles used by the CI build pipeline
-infra/           local dev support only — Grafana/Prometheus/OTel/Postgres
-                 config. No Terraform/Kubernetes/Jenkins here — see
-                 "Related repo" below.
-docs/            SRS.md, demo-walkthrough.md
-scripts/         dev.sh, dev-light.sh, seed-demo-data.sh
-Jenkinsfile      thin CI trigger: turbo --filter decides which service(s)
-                 changed, dispatches builds one at a time (see below)
-```
-
-## Related repo: platform-gitops
-
-Deployment infra — Terraform, Kubernetes manifests, ArgoCD Application definitions, and the actual build/push/deploy Jenkins pipeline — lives in a separate repo, kept apart so deploy concerns don't mix into the application codebase:
-
-**https://github.com/dip7501686040/platform-gitops**
-
 ## Getting started
 
 ### Prerequisites
@@ -209,6 +126,89 @@ terraform apply -var-file=envs/local.tfvars -var-file=secrets.local.tfvars
 ```
 
 Jenkins should be back at http://localhost:8091 once that completes.
+
+## Architecture at a glance
+
+The core pipeline is asynchronous, RabbitMQ-driven event choreography — each service publishes a routing-keyed event on completion and reacts only to the events it cares about, with no service calling the next one directly. Auth, multi-tenancy, and template rendering are the exception: those are synchronous gRPC calls, made where a request genuinely needs an answer before it can proceed.
+
+```
+Client / API key
+      │ REST
+      ▼
+ api-gateway ──gRPC──► identity-service   (JWT / API-key auth)
+      │       ──gRPC──► tenant-service     (multi-tenancy, membership, API keys)
+      │  gRPC: createEvent
+      ▼
+ event-service ──publish──► event.created
+                                  │
+                                  ▼
+                        rule-engine-service (evaluate rules)
+                                  │ publish
+                                  ▼
+                         event.rule.matched
+                                  │
+                                  ▼
+                             ai-service (LLM: severity / impact / duplicate)
+                                  │ publish
+                                  ▼
+                         event.ai.completed
+                                  │
+                                  ▼
+                       notification-service ──gRPC──► template-service (render)
+                                  │            ──gRPC──► tenant-service (membership)
+                                  │ publish
+                                  ▼
+                        notification.created
+                                  │
+                                  ▼
+                          channel-service (email / webhook / dashboard delivery)
+                                  │ publish
+                                  ▼
+                          notification.sent
+
+ Parallel async taps (data collection, not in the critical path):
+   event.created, event.ai.completed, notification.sent ──► audit-service     (who did what, when)
+   event.created, notification.sent                      ──► analytics-service (aggregates)
+
+ Every service ──► OpenTelemetry ──► Prometheus / Loki / Jaeger ──► Grafana ──► tenant "Observability" tab
+```
+
+**Services** (`apps/`): `identity-service`, `tenant-service`, `event-service`, `rule-engine-service`, `notification-service`, `channel-service`, `ai-service`, `analytics-service`, `audit-service`, `api-gateway`, `template-service`, `web` (Next.js), `prediction-service` (Python).
+
+**Shared libraries** (`packages/`): `common`, `config`, `grpc`, `logger`, `rabbitmq`, `telemetry`, `typescript-config` — a pnpm + Turborepo monorepo.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Backend | NestJS, gRPC, Prisma, PostgreSQL, RabbitMQ |
+| Frontend | Next.js |
+| AI | OpenAI / Anthropic-backed event analysis |
+| Observability | OpenTelemetry, Prometheus, Loki, Jaeger, Grafana, cAdvisor |
+| Monorepo tooling | pnpm workspaces, Turborepo (dependency-graph-aware builds) |
+| Infra / CI-CD | Terraform, Kubernetes + Helm, ArgoCD (GitOps), Jenkins, Docker |
+| Local AWS emulation | [Floci](https://github.com/floci/floci) — EC2/ECR/EKS as real Docker containers, no AWS account needed |
+
+## Repository structure
+
+```
+apps/            13 services (see above)
+packages/        shared libraries
+docker/          Dockerfiles used by the CI build pipeline
+infra/           local dev support only — Grafana/Prometheus/OTel/Postgres
+                 config. No Terraform/Kubernetes/Jenkins here — see
+                 "Related repo" below.
+docs/            SRS.md, demo-walkthrough.md
+scripts/         dev.sh, dev-light.sh, seed-demo-data.sh
+Jenkinsfile      thin CI trigger: turbo --filter decides which service(s)
+                 changed, dispatches builds one at a time (see below)
+```
+
+## Related repo: platform-gitops
+
+Deployment infra — Terraform, Kubernetes manifests, ArgoCD Application definitions, and the actual build/push/deploy Jenkins pipeline — lives in a separate repo, kept apart so deploy concerns don't mix into the application codebase:
+
+**https://github.com/dip7501686040/platform-gitops**
 
 ## Documentation
 
