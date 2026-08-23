@@ -18,8 +18,11 @@ async function bootstrap() {
   // signature against the exact bytes Stripe signed.
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
-  // Bearer tokens, not cookies -- credentials stays false.
-  app.enableCors({ origin: env.FRONTEND_URL });
+  // Bearer tokens, not cookies -- credentials stays false. CORS_ORIGINS is
+  // separate from FRONTEND_URL (used elsewhere for OAuth redirect targets,
+  // which must stay a single URL) -- this one's a comma-separated allowlist
+  // so both localhost:3000 and the ALB's published origin can coexist.
+  app.enableCors({ origin: env.CORS_ORIGINS.split(",").map((s) => s.trim()) });
 
   app.useGlobalFilters(new HttpLoggingExceptionFilter(logger));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

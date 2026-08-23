@@ -19,6 +19,9 @@ const schema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().optional(),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
+  // Comma-separated CORS allowlist -- separate from FRONTEND_URL (a single
+  // redirect target for the OAuth callback flow, below).
+  CORS_ORIGINS: z.string().default("http://localhost:3000"),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
 });
 
