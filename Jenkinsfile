@@ -19,7 +19,35 @@
 // repo is the job's primary SCM.
 
 pipeline {
-  agent any
+  // Kubernetes-plugin pod agent, not `agent any` -- Jenkins runs as a k8s
+  // workload (see platform-gitops/k8s/jenkins/values.yaml), and the k3s
+  // node it schedules onto has no docker.sock to give a build agent. This
+  // step used to `docker run node:24 ...` against the Jenkins EC2 host's
+  // own docker (leftover from before that EC2->k8s migration) -- same class
+  // of problem platform-gitops/jenkins/Jenkinsfile's kaniko container
+  // already solves for the actual image builds; mirrored here for this
+  // step's own node:24 need instead of shelling out to a nonexistent
+  // docker binary. The Kubernetes plugin mounts the same workspace volume
+  // into every container in the pod, so the node container below sees the
+  // checked-out repo with no explicit -v/-w mount needed.
+  agent {
+    kubernetes {
+      yaml '''
+        apiVersion: v1
+        kind: Pod
+        spec:
+          containers:
+          - name: node
+            image: node:24
+            command: ["sleep"]
+            args: ["99d"]
+            resources:
+              requests: { cpu: 250m, memory: 512Mi }
+              limits: { cpu: 1000m, memory: 1Gi }
+      '''
+      defaultContainer 'jnlp'
+    }
+  }
 
   // Only takes effect after this Jenkinsfile has run once — a declarative
   // triggers{} block is registered from the *previous* run, not the one
@@ -45,28 +73,29 @@ pipeline {
 
           // No `pnpm install` needed — turbo resolves the workspace graph
           // straight from package.json + pnpm-lock.yaml, and `pnpm dlx`
-          // fetches just the turbo binary itself. Runs inside node:24 (the
-          // engines.node this repo requires) via the Jenkins EC2 host's
-          // own docker, same daemon docker build/push already use — no
-          // extra install needed on the instance itself.
-          def dryRun = sh(
-            script: """
-              docker run --rm \\
-                -v "\$PWD":/repo -w /repo \\
-                -v /var/lib/jenkins/pnpm-store:/pnpm-store \\
-                node:24 sh -c '
-                  corepack enable
-                  pnpm config set store-dir /pnpm-store
-                  # Must track package.json's own "turbo": "^2.3.0" range, not
-                  # a hard pin -- 2.3.0 exactly predates the top-level
-                  # `concurrency` key this repo's turbo.json already uses,
-                  # so a pinned dlx install fails to parse it even though a
-                  # real `pnpm install` here resolves it fine.
-                  pnpm dlx turbo@^2.3.0 run build --filter="...[${baseSha}]" --dry=json
-                '
-            """,
-            returnStdout: true
-          ).trim()
+          // fetches just the turbo binary itself. Runs inside the pod's own
+          // node:24 container (the engines.node this repo requires) --
+          // no docker daemon needed or available. No persistent pnpm store
+          // mount either (the old docker-run version had one) -- this pod
+          // is single-use per build, same as the kaniko pods in
+          // platform-gitops/jenkins/Jenkinsfile, and this dry-run is a
+          // metadata-only diff, not a real build, so losing that cache
+          // doesn't cost much.
+          def dryRun = container('node') {
+            sh(
+              script: """
+                corepack enable
+                pnpm config set store-dir /tmp/pnpm-store
+                # Must track package.json's own "turbo": "^2.3.0" range, not
+                # a hard pin -- 2.3.0 exactly predates the top-level
+                # `concurrency` key this repo's turbo.json already uses,
+                # so a pinned dlx install fails to parse it even though a
+                # real `pnpm install` here resolves it fine.
+                pnpm dlx turbo@^2.3.0 run build --filter="...[${baseSha}]" --dry=json
+              """,
+              returnStdout: true
+            ).trim()
+          }
 
           def affectedServices = parseAffectedServices(dryRun)
 
