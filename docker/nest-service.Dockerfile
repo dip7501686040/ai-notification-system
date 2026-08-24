@@ -47,4 +47,9 @@ COPY --from=installer /app .
 USER appuser
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
   CMD ["node", "-e", "require('http').get({host:'localhost',port:process.env.PORT||3000,path:'/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
-CMD ["sh", "-c", "if [ -f \"apps/$APP_DIR/prisma/schema.prisma\" ]; then \"apps/$APP_DIR/node_modules/.bin/prisma\" migrate deploy --schema=\"apps/$APP_DIR/prisma/schema.prisma\"; fi && node \"apps/$APP_DIR/dist/main.js\""]
+# Migrations no longer run here -- baking `prisma migrate deploy` into
+# every container start meant it re-ran on ANY pod restart (crash, node
+# reschedule, HPA scale-out), not just real deploys. Moved to a PreSync
+# hook Job instead (platform-gitops's nest-service chart, migrate-job.yaml)
+# that runs once per actual ArgoCD sync.
+CMD ["sh", "-c", "node \"apps/$APP_DIR/dist/main.js\""]
