@@ -84,6 +84,14 @@ pipeline {
           def dryRun = container('node') {
             sh(
               script: """
+                # Turbo shells out to git internally to resolve the --filter
+                # diff. The workspace here is checked out by Jenkins' own
+                # git step (a different UID than this node:24 container
+                # runs as), which trips git's post-CVE-2022-24765
+                # dubious-ownership guard the moment turbo touches it.
+                # Wildcarded, not the literal path: the workspace path
+                # embeds the job name, which differs per job.
+                git config --global --add safe.directory '*'
                 corepack enable
                 pnpm config set store-dir /tmp/pnpm-store
                 # Must track package.json's own "turbo": "^2.3.0" range, not
