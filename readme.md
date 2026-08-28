@@ -60,30 +60,33 @@ Seeds two tenants (to demonstrate multi-tenancy + RBAC), users, templates, rules
 This runs the complete GitOps pipeline end-to-end on your machine via Floci, a local Docker-based AWS emulator — the same Terraform provisions this identically against real AWS later.
 
 ```bash
-# 1. Clone the deploy repo alongside this one
+# 1. Clone the deploy repos alongside this one — GitOps state
+#    (k8s charts, ArgoCD manifests, the Jenkins CI pipeline) and Terraform
+#    infrastructure are split into two repos with two different
+#    reconciliation loops.
 git clone https://github.com/dip7501686040/platform-gitops.git ../platform-gitops
+git clone https://github.com/dip7501686040/platform-infrastructure.git ../platform-infrastructure
 
 # 2. Point aws/terraform at Floci's emulated endpoint (local/aws-config,
-#    local/aws-credentials in platform-gitops are committed as-is — Floci's
-#    values are fixed dummy credentials, the same for everyone, not a real
-#    secret, so there's nothing to fill in)
-cd ../platform-gitops
+#    local/aws-credentials in platform-infrastructure are committed as-is —
+#    Floci's values are fixed dummy credentials, the same for everyone, not
+#    a real secret, so there's nothing to fill in)
+cd ../platform-infrastructure
 source local/floci-env.sh
 
 # 3. Provision: VPC, ECR repos, an EKS (k3s) cluster, and a fully-seeded
 #    Jenkins EC2 instance — Terraform starts Floci itself if it isn't
 #    already running
-cd terraform
 terraform init -backend-config=envs/local.backend.hcl
 terraform apply -var-file=envs/local.tfvars -var-file=secrets.local.tfvars
 ```
 
 What you get:
 
-- **Jenkins** at http://localhost:8091 (a Terraform-managed SSH tunnel — no manual port-forwarding needed on future applies). Log in as `admin` with the password at `platform-gitops/terraform/envs/state/jenkins-admin-password.txt`.
+- **Jenkins** at http://localhost:8091 (a Terraform-managed SSH tunnel — no manual port-forwarding needed on future applies). Log in as `admin` with the password at `platform-infrastructure/envs/state/jenkins-admin-password.txt`.
 - **`build-<service>`** jobs — one per service, plus a generic `build-service` job — build the image, push to the emulated ECR, and bump that service's tag in `platform-gitops`.
 - **`watch-source-and-build`** — polls this repo's `main` (Jenkins' built-in SCM trigger; click "Build Now" once after first seeding to register its schedule). On a real change it runs `turbo run build --filter='...[<last-commit>]'` to find every package actually affected — dependency-graph aware, so a shared `packages/*` change correctly triggers every service that depends on it — and builds them one at a time, never in parallel, never for anything unaffected.
-- **ArgoCD** — installed automatically by `terraform apply` itself (`helm upgrade --install` via local-exec, idempotent, self-heals a cluster that never had it installed at all), watching `platform-gitops` and auto-syncing every tag bump so the deployed services stay in sync with what Jenkins just built. Its Application/ApplicationSet manifests are also re-applied on every apply, so live cluster state can't silently drift from what this repo says it should be. `kubectl` access is via the cluster's own kubeconfig (see `terraform output kubeconfig_command` in `platform-gitops/terraform`) — Floci's `aws eks update-kubeconfig` emulation has known gaps, so pulling kubeconfig directly from the `floci-eks-<cluster-name>` container is the fallback if that command doesn't cooperate.
+- **ArgoCD** — installed automatically by `terraform apply` itself (`helm upgrade --install` via local-exec, idempotent, self-heals a cluster that never had it installed at all), watching `platform-gitops` and auto-syncing every tag bump so the deployed services stay in sync with what Jenkins just built. Its Application/ApplicationSet manifests are also re-applied on every apply, so live cluster state can't silently drift from what this repo says it should be. `kubectl` access is via the cluster's own kubeconfig (see `terraform output kubeconfig_command` in `platform-infrastructure`) — Floci's `aws eks update-kubeconfig` emulation has known gaps, so pulling kubeconfig directly from the `floci-eks-<cluster-name>` container is the fallback if that command doesn't cooperate.
 - **Self-healing on every apply** — three more things `terraform apply` does automatically, every time, not just on first setup: cleans up zombie `Terminating` pods / dead nodes / storage orphaned by k3s re-registering a new node identity on restart; creates/updates the `app-secrets` k8s Secret backing services and every app pod need (from `secrets.local.tfvars` — local-only, prod stays a deliberate manual step); re-establishes the Jenkins SSH tunnel.
 
 #### Coming back after a system reboot or Docker restart
@@ -120,9 +123,8 @@ docker update --restart=unless-stopped floci-ecr-registry floci-eks-ai-notificat
 # it's a fresh terminal since the reboot, so the AWS_PROFILE/endpoint env
 # vars aren't set anymore either -- skipping this is what "No valid
 # credential sources found" from the aws provider means.
-cd ../platform-gitops
+cd ../platform-infrastructure
 source local/floci-env.sh
-cd terraform
 terraform apply -var-file=envs/local.tfvars -var-file=secrets.local.tfvars
 ```
 
