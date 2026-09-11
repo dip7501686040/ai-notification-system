@@ -1,0 +1,137 @@
+Load Testing — a walkthrough you can repeat
+1. The core idea
+A load test answers one question: "at what request rate does this system stop meeting its promise, and why?"
+
+You do it in a loop:
+
+
+ pick a flow  →  write a script that drives it  →  ramp load until it breaks
+       ↑                                                      │
+       │                                                      ▼
+   prove the fix  ←  apply a fix  ←  find WHY it broke (observability)
+Everything below is that loop, with the exact files and commands.
+
+2. Phase 0 — decide what you're testing before touching k6
+Three decisions, on paper:
+
+a) The flow. One user-visible action that exercises the code path you care about. Ours: POST /events (it fans out gateway → identity → event-service → tenant + rule-engine → Postgres → RabbitMQ). Pick the write path — it touches the most services.
+
+b) The load model. This is the #1 mistake people make.
+
+Model	k6 executor	What it does	Use it to…
+Closed	ramping-vus	N virtual users, each waits for its response before sending the next	see realistic per-user latency; it self-limits — hides the cliff
+Open	ramping-arrival-rate	fire X req/s no matter how slow responses are	find the breaking point — the backlog builds and the knee is obvious
+We use open (mainflow-open.js) to find the edge, closed (mainflow-closed.js) for the "what a user feels" number.
+
+c) The SLO. The promise. Without it "broken" is subjective. Ours: p95 < 300 ms, error rate < 1 %.
+
+3. Phase 1 — the k6 script (anatomy)
+A k6 script is 4 parts. Open loadtest/mainflow-open.js alongside this:
+
+
+// (1) METRICS you care about — custom, on top of k6's built-ins
+const ingest = new Trend("ingest_latency", true);   // a latency distribution
+const ingestErr = new Rate("ingest_errors");        // a 0..1 failure fraction
+
+// (2) OPTIONS — the shape of the load + the pass/fail rules
+export const options = {
+  scenarios: { edge: {
+    executor: "ramping-arrival-rate",
+    startRate: 2, timeUnit: "1s",
+    preAllocatedVUs: 20, maxVUs: 60,   // VU pool k6 draws from to hit the rate
+    stages: [ {target:3,duration:"30s"}, {target:6,...}, ... ],  // the ramp
+  }},
+  thresholds: {
+    ingest_latency: ["p(95)<300"],     // marks the run ✗ if crossed
+    http_req_failed: [{ threshold:"rate<0.40", abortOnFail:true, delayAbortEval:"1m" }], // kill switch
+  },
+};
+
+// (3) setup() — runs ONCE, return value is passed to every iteration
+export function setup() { return provisionTenant({ api: API }); }  // register+tenant+rule
+
+// (4) default fn — ONE iteration = one unit of load
+export default function (data) {
+  const res = http.post(`${API}/events`, JSON.stringify({...}),
+    { headers: {...}, tags: { step: "ingest" } });   // tags let you slice metrics later
+  ingest.add(res.timings.duration);
+  ingestErr.add(res.status >= 400);
+}
+Supporting files:
+
+loadtest/lib/setup.js — the shared provisionTenant() (register → tenant → enabled rule, all fatal on failure). Reused by every scenario. Lesson: put per-run fixture creation in setup(), not in the iteration — it runs once, and its return value is the only thing shared.
+loadtest/smoke.sh — run this first, always. Curls the flow once by hand. If POST /events isn't 201 here, the k6 run measures garbage. 5 seconds saves 30 minutes.
+loadtest/hold.js — constant-arrival-rate at a fixed painful rate. Not for finding the edge — for sitting in the broken state while you screenshot / diagnose.
+4. Phase 2 — baseline run
+
+bash loadtest/smoke.sh                                  # sanity
+kubectl scale deploy --all -n ai-notification --replicas=1   # known state
+caffeinate -i k6 run --summary-export=loadtest/out/baseline-open.json loadtest/mainflow-open.js
+caffeinate -i = don't let the Mac sleep mid-run (a sleep gave us a bogus max=17m40s).
+
+How to read the k6 summary — the 6 lines that matter:
+
+Line	Meaning	Bad sign
+http_reqs ...... 6.7/s	delivered rate	far below your target → system can't keep up
+dropped_iterations 1917	iterations k6 wanted to start but couldn't (VU pool exhausted)	any large number → you've passed the edge
+ingest_latency p(95)	your SLO metric	crosses your threshold → knee
+http_req_failed 29%	non-2xx fraction	rising → knee
+iteration_duration vs http_req_duration	former excludes sleep/think-time	huge gap → sleep pollution or setup cost
+✓/✗ thresholds	pass/fail verdict	—
+The knee = the ramp step where p95 crosses the SLO and errors start climbing. That step's rate is your baseline capacity. Ours: ~2–4 req/s.
+
+5. Phase 3 — diagnose why (the observability triangle)
+Four tools, each answers a different question. Run loadtest/hold.js at a rate past the knee so the system sits broken, then look:
+
+Tool	URL / command	Answers
+k6 output	the run itself	is it broken, and how (latency vs errors vs drops)
+kubectl top pods	kubectl top pods -n ai-notification --sort-by=cpu	which pod is starved (CPU near its limit)
+Grafana	http://localhost:9093/d/phase-f-loadtest	rate / latency / error trends over time; CPU vs limit; throttle ratio
+Jaeger	http://localhost:9095/search → service, Min Duration 3s → slowest trace	where inside a slow request the time goes (which span)
+Decision rules — read the pod that's hottest, then the trace:
+
+
+pod CPU ≈ its limit  +  throttle ratio > 0.2   → CPU-bound. Fix = more replicas (HPA) / higher limit / less work per request
+pod CPU low, pod mem ≈ limit / OOMKilled        → memory-bound. Fix = raise mem / fix a leak
+pod CPU low, Postgres "too many clients"        → connection-pool bound. Fix = PgBouncer / connection_limit
+pod CPU low, RabbitMQ backlog climbing          → consumer-throughput bound. Fix = more consumers (KEDA on queue depth)
+pod CPU low, latency in ONE downstream span     → that downstream service is the real bottleneck — go test IT
+pod CPU low, latency in dns.lookup / tcp.connect → connection churn — no channel pooling / no DNS cache
+Prometheus (http://localhost:9094/graph) is for raw ad-hoc queries when Grafana doesn't have the panel — e.g. rate(container_cpu_cfs_throttled_periods_total{namespace="ai-notification"}[1m]) / rate(container_cpu_cfs_periods_total[1m]).
+
+Note we had to add the kubelet scrape to Prometheus (envs/state/prometheus-config.yaml) — the Floci setup didn't scrape pod CPU. Lesson: check your metric coverage before you trust "no data" = "not the problem".
+
+6. Phase 4 — fix, Phase 5 — prove
+Fix: kubectl apply -f loadtest/hpa/api-gateway.yaml (CPU HPA), or loadtest/keda/channel-service.yaml (queue-depth KEDA). Verify kubectl get hpa shows a real TARGETS %, not <unknown>.
+Prove: re-run the exact same k6 command → --summary-export=loadtest/out/hpa-open.json. Compare the two JSON files: sustained req/s at SLO, p95 at 2× baseline load, peak replicas.
+Then find the new edge — the bottleneck always moves (scale the gateway → event-service becomes the wall → Postgres → …). Document the chain.
+7. How we actually nailed this bottleneck (the reasoning trail)
+k6: median 87 ms but p95 8 s and 29 % 504s at only ~6.7 req/s. → Single requests fine, concurrency kills it. Not a code bug (median is fine).
+kubectl top during the hold: event-service 234m/250m, api-gateway 203m/250m, everyone else <90m. → CPU-bound, at those two pods.
+Postgres (diag.sh): 18/100 connections. RabbitMQ: backlog only because consumers were scaled to 0. → DB and broker ruled out.
+Jaeger slowest POST /events trace: the 1.7 s was almost entirely grpc Event/CreateEvent. Inside it, Tenant/CheckMembers = 491 ms but tenant-service's own span = 19 ms; Rule/HasMatchingRule = 205 ms but rule-engine's own span = 9 ms. The gap was dns.lookup (100 ms) + tcp.connect (200 ms). → A new TCP connection + DNS lookup per gRPC call — no channel pooling.
+Conclusion: two stacked causes — (a) 250m CPU cap, (b) per-call connection churn. HPA helps (a) by spreading load; the real fix for (b) is gRPC channel reuse + DNS caching + a token cache on the auth hop.
+Each tool eliminated a hypothesis. That's the skill: hypothesis → which tool disproves it → next hypothesis.
+
+8. Now build your own — checklist
+To load-test a different flow / find a different bottleneck:
+
+Pick the flow. bash loadtest/smoke.sh style: curl it once, confirm the happy path and the exact request/response shapes.
+Copy mainflow-open.js → myflow-open.js. Change: the setup() fixtures (in lib/setup.js or inline), the http.* call in default, the custom Trend/Rate names, the tags.
+Set the SLO in thresholds.
+Guess the bottleneck and make sure you can see it:
+CPU/mem → kubectl top + the Grafana CPU panels (already wired).
+a queue → add rabbitmq_queue_* panel / rabbitmqctl list_queues.
+a DB → psql -c "select ... from pg_stat_activity" (in diag.sh).
+a downstream HTTP dep → Jaeger, or add its /metrics scrape to prometheus-config.yaml + curl -X POST localhost:9094/-/reload.
+something with no metric → add the exporter/scrape first, or you'll be blind.
+Baseline at min replicas, caffeinate -i k6 run --summary-export=... myflow-open.js. Find the knee.
+Hold past the knee (hold.js pattern), run your diagnosis snapshot (diag.sh pattern), apply the decision rules in §5.
+Fix → re-run same command → diff the summary JSONs → find the new edge.
+Golden rules:
+
+One variable per run. Change the fix or the load, never both.
+Open model to find the edge, closed model for the UX number.
+smoke.sh before every k6 run.
+"No data" ≠ "not the bottleneck" — verify the metric exists.
+The bottleneck moves. You're never done after one fix.

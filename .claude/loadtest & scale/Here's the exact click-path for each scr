@@ -1,0 +1,55 @@
+Here's the exact click-path for each screenshot.
+
+Setup (one time)
+1. Grafana password:
+
+
+cat ~/platform-infrastructure/envs/state/grafana-admin-password.txt
+2. Import the dashboard — open http://localhost:9093/dashboard/import
+
+log in: user admin, the password above
+click Upload dashboard JSON file → pick ~/ai-notification-system/loadtest/grafana-phaseF.json
+Prometheus datasource dropdown → select Prometheus
+click Import
+you land on the dashboard. Its permanent URL is http://localhost:9093/d/phase-f-loadtest
+top-right: set range to Last 15 minutes, refresh to 5s
+Run the load
+Terminal 1 — CPU numbers:
+
+
+export KUBECONFIG=~/platform-infrastructure/envs/state/kubeconfig-ai-notification-floci
+while :; do clear; date +%T; kubectl top pods -n ai-notification --sort-by=cpu; sleep 2; done
+Terminal 2 — 3-minute overload:
+
+
+cd ~/ai-notification-system && export PATH="$HOME/bin:$HOME/.docker/bin:$PATH"
+caffeinate -i k6 run -e RATE=12 -e DURATION=3m loadtest/hold.js
+Wait ~60 seconds (let the graphs fill), then take the shots below. You have ~2 min.
+
+Screenshots
+In Grafana (http://localhost:9093/d/phase-f-loadtest) — to isolate one panel: hover it, press v (fullscreen), screenshot, press Esc.
+
+#	Panel title on the dashboard	What it should show
+1	Pod CPU (cores) vs the 250m limit ← the bottleneck	event-service + api-gateway lines flat on the red 0.25 line
+2	CPU throttling ratio	those two pods jumping to 0.5–0.9
+3	POST /events — latency percentiles (red = 300ms SLO)	p95/p99 lifting off the red line to multiple seconds
+4	POST /events — request rate by status_code	a 504 band appearing on top of the 201 band
+5	RabbitMQ — backlog, unacked, publish rate...	"messages ready (backlog)" ramping up
+6	Whole dashboard (no fullscreen)	one wide shot of everything degrading together
+In Prometheus (optional, for a raw-query shot) — open http://localhost:9094/graph
+
+paste in the query box: sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="ai-notification"}[1m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace="ai-notification"}[1m]))
+click Graph tab → Execute → screenshot (#7)
+In Jaeger — open http://localhost:9095/search
+
+Service → api-gateway
+Operation → POST /events
+Min Duration → type 3s
+Lookback → Last Hour
+Limit Results → 20
+click Find Traces
+Screenshot #8 — the scatter plot at the top (duration vs time; dots exploding upward)
+click the slowest row in the list (longest bar) → trace timeline opens
+expand the spans (grpc Event/CreateEvent → its children)
+Screenshot #9 — the flame graph: Event/CreateEvent holding almost the whole width; Tenant/CheckMembers and Rule/HasMatchingRule each with fat dns.lookup / tcp.connect child bars
+Terminal 1 — Screenshot #10 — the kubectl top output with event-service ~234m / api-gateway ~203m next to the 250m limit.

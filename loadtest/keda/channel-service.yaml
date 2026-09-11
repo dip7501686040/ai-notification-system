@@ -1,0 +1,59 @@
+# Phase F -- KEDA ScaledObject: scale channel-service on RabbitMQ queue
+# depth, not CPU. channel-service is a pure queue worker with no DB, so it
+# is the clean KEDA candidate (and dodges the Postgres connection ceiling).
+#
+# Why queue-depth, not CPU: CPU-HPA reacts to a symptom (latency already
+# degrading). Queue depth is the backlog itself -- scale on it and you add
+# consumers BEFORE user-visible degradation.
+#
+# KEDA operator is already installed (platform-infrastructure
+# terraform_data.keda_install) on the app_services cluster. This object
+# creates/manages its own HPA under the hood, so the same ArgoCD
+# `ignoreDifferences` on /spec/replicas is required (plan Phase 3a).
+#
+#   kubectl apply -f loadtest/keda/channel-service.yaml
+#   kubectl get scaledobject,hpa -n ai-notification
+#
+# --- trigger option A (default here): Prometheus -------------------------
+# Phase D wired Prometheus to scrape RabbitMQ's rabbitmq_prometheus plugin,
+# so the queue-depth series already exists. `serverAddress` must be
+# reachable from the keda-operator pod on app_services -- floci-prometheus
+# is a plain container on floci-static, NOT in-cluster, so you likely need
+# a stub Service+Endpoints in the keda namespace pointing at
+# 172.30.0.28:9090 (same pattern as otel_cross_cluster_stub in
+# platform-infrastructure/main.tf). Adjust serverAddress to that stub.
+#
+# --- trigger option B: native rabbitmq (mgmt API) ----------------------
+# Simpler wiring if the mgmt API (:15672) is reachable cross-cluster:
+#   - type: rabbitmq
+#     metadata:
+#       protocol: http
+#       host: http://<user>:<pass>@<backing-services-ip>:15672
+#       queueName: channel-service.notification.created
+#       mode: QueueLength
+#       value: "30"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: channel-service
+  namespace: ai-notification
+spec:
+  scaleTargetRef:
+    name: channel-service
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  pollingInterval: 15
+  cooldownPeriod: 180
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 180
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://keda-prometheus-stub.keda.svc.cluster.local:9090
+        metricName: channel_queue_ready
+        query: sum(rabbitmq_queue_messages_ready{queue="channel-service.notification.created"})
+        threshold: "30"

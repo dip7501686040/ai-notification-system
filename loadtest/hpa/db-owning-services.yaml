@@ -1,0 +1,55 @@
+# Phase F -- HPA on TWO DB-owning services, applied deliberately to walk
+# into and DOCUMENT the Postgres connection ceiling (plan edge #5), not to
+# actually scale them safely.
+#
+# Each nest-service uses the Prisma default pool (~2*nCPU+1 connections per
+# replica). Postgres runs with the default max_connections=100 and no
+# pooler. Scaling event-service + rule-engine-service to 2 each, on top of
+# the ~7 other DB-owning services already at 1, is enough to start seeing
+# `FATAL: sorry, too many clients already` in the pod logs and
+# `pg_stat_activity` maxing out -- BEFORE CPU is the limiter.
+#
+# Do NOT keep these applied for the "prove the gain" run -- they muddy the
+# api-gateway result. Apply, capture the failure, then delete:
+#   kubectl apply  -f loadtest/hpa/db-owning-services.yaml
+#   kubectl delete -f loadtest/hpa/db-owning-services.yaml
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-service
+  namespace: ai-notification
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: event-service
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rule-engine-service
+  namespace: ai-notification
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rule-engine-service
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60

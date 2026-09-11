@@ -1,0 +1,128 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ],
+  "__requires": [
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "text", "name": "Text", "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "Phase F — main-flow load test",
+  "uid": "phase-f-loadtest",
+  "tags": ["loadtest", "phase-f"],
+  "time": { "from": "now-15m", "to": "now" },
+  "refresh": "5s",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat", "title": "POST /events — req/s (2xx)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } },
+      "targets": [ { "expr": "sum(rate(gateway_requests_total{route=\"/events\",status_code=~\"2..\"}[1m]))", "refId": "A" } ]
+    },
+    {
+      "type": "stat", "title": "POST /events — error rate %",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1,
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 } ] } } },
+      "targets": [ { "expr": "100 * sum(rate(gateway_requests_total{route=\"/events\",status_code!~\"2..\"}[1m])) / clamp_min(sum(rate(gateway_requests_total{route=\"/events\"}[1m])), 0.0001)", "refId": "A" } ]
+    },
+    {
+      "type": "stat", "title": "POST /events — p95 latency",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ms", "decimals": 0,
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 300 }, { "color": "red", "value": 1000 } ] } } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_ms_bucket{route=\"/events\"}[1m])) by (le))", "refId": "A" } ]
+    },
+    {
+      "type": "stat", "title": "RabbitMQ backlog (ready msgs)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } },
+      "targets": [ { "expr": "sum(rabbitmq_queue_messages_ready)", "refId": "A" } ]
+    },
+
+    {
+      "type": "timeseries", "title": "POST /events — request rate by status_code (504 = gateway timed out downstream)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 30, "stacking": { "mode": "normal" } } } },
+      "targets": [ { "expr": "sum by (status_code) (rate(gateway_requests_total{route=\"/events\"}[1m]))", "legendFormat": "{{status_code}}", "refId": "A" } ]
+    },
+    {
+      "type": "timeseries", "title": "POST /events — latency percentiles (red = 300ms SLO)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 0 } },
+        "overrides": [ { "matcher": { "id": "byName", "options": "SLO 300ms" }, "properties": [ { "id": "custom.lineStyle", "value": { "dash": [8, 8] } }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] } ] },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_ms_bucket{route=\"/events\"}[1m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.90, sum(rate(gateway_request_duration_ms_bucket{route=\"/events\"}[1m])) by (le))", "legendFormat": "p90", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_ms_bucket{route=\"/events\"}[1m])) by (le))", "legendFormat": "p95", "refId": "C" },
+        { "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_ms_bucket{route=\"/events\"}[1m])) by (le))", "legendFormat": "p99", "refId": "D" },
+        { "expr": "vector(300)", "legendFormat": "SLO 300ms", "refId": "E" }
+      ]
+    },
+
+    {
+      "type": "timeseries", "title": "Pod CPU (cores) vs the 250m limit  ← the bottleneck",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3, "custom": { "drawStyle": "line", "fillOpacity": 15 } },
+        "overrides": [ { "matcher": { "id": "byName", "options": "250m limit" }, "properties": [ { "id": "custom.lineStyle", "value": { "dash": [10, 10] } }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] } ] },
+      "targets": [
+        { "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"ai-notification\",container!=\"POD\",container!=\"\"}[1m]))", "legendFormat": "{{pod}}", "refId": "A" },
+        { "expr": "0.25", "legendFormat": "250m limit", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "CPU throttling ratio (throttled periods / periods)  — >0.2 = slamming the limit",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "drawStyle": "line", "fillOpacity": 25 },
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.2 }, { "color": "red", "value": 0.5 } ] } } },
+      "targets": [
+        { "expr": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"ai-notification\"}[1m])) / clamp_min(sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"ai-notification\"}[1m])), 0.0001)", "legendFormat": "{{pod}}", "refId": "A" }
+      ]
+    },
+
+    {
+      "type": "timeseries", "title": "Pod memory working-set vs 256Mi limit",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 15 } },
+        "overrides": [ { "matcher": { "id": "byName", "options": "256Mi limit" }, "properties": [ { "id": "custom.lineStyle", "value": { "dash": [10, 10] } }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] } ] },
+      "targets": [
+        { "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"ai-notification\",container!=\"POD\",container!=\"\"})", "legendFormat": "{{pod}}", "refId": "A" },
+        { "expr": "268435456", "legendFormat": "256Mi limit", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "RabbitMQ — backlog, unacked, publish rate, scheduler run-queue",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+      "targets": [
+        { "expr": "sum(rabbitmq_queue_messages_ready)", "legendFormat": "messages ready (backlog)", "refId": "A" },
+        { "expr": "sum(rabbitmq_queue_messages_unacked)", "legendFormat": "messages unacked", "refId": "B" },
+        { "expr": "sum(rate(rabbitmq_channel_messages_published_total[1m]))", "legendFormat": "publish/s", "refId": "C" },
+        { "expr": "rabbitmq_erlang_scheduler_run_queue", "legendFormat": "erlang scheduler run-queue", "refId": "D" }
+      ]
+    },
+
+    {
+      "type": "text", "title": "Where the request time actually goes — Jaeger",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 27 },
+      "options": { "mode": "markdown", "content": "Jaeger `:9095` → Service **api-gateway**, Operation **POST /events**, Min Duration **3s**, Lookback **1h** → open the slowest.\n\nExpected shape: `POST /events` → `grpc Event/CreateEvent` holds ~all of it → inside event-service, `grpc Tenant/CheckMembers` + `grpc Rule/HasMatchingRule` each spend **hundreds of ms in `dns.lookup` + `tcp.connect`** while the downstream service's own span is <20ms. That's **no gRPC channel pooling / DNS not cached**, amplified by CPU throttling on this dashboard. HPA spreads the churn across pods; it doesn't remove the per-call cost." }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 2
+}

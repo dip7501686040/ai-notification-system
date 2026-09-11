@@ -17,3 +17,8 @@ __pycache__/
 
 # Terraform, k8s deploy manifests, and the Floci local-dev env pointer now
 # live in the platform-gitops repo, not here — see infra/README.md.
+
+# k6 run artifacts (summary JSON / diag snapshots) -- ephemeral, and a
+# summary export can embed setup()'s return value (a live access token),
+# so these never get committed.
+loadtest/out/
