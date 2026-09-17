@@ -1,0 +1,15 @@
+{
+  "identity-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/identity-service", "APP_DIR": "identity-service" } },
+  "tenant-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/tenant-service", "APP_DIR": "tenant-service" } },
+  "event-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/event-service", "APP_DIR": "event-service" } },
+  "rule-engine-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/rule-engine-service", "APP_DIR": "rule-engine-service" } },
+  "template-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/template-service", "APP_DIR": "template-service" } },
+  "notification-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/notification-service", "APP_DIR": "notification-service" } },
+  "channel-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/channel-service", "APP_DIR": "channel-service" } },
+  "ai-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/ai-service", "APP_DIR": "ai-service" } },
+  "analytics-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/analytics-service", "APP_DIR": "analytics-service" } },
+  "audit-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/audit-service", "APP_DIR": "audit-service" } },
+  "api-gateway": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/api-gateway", "APP_DIR": "api-gateway" } },
+  "web": { "dockerfile": "docker/web-service.Dockerfile", "context": ".", "buildArgs": { "NEXT_PUBLIC_API_URL": "http://localhost:8000" } },
+  "prediction-service": { "dockerfile": "apps/prediction-service/Dockerfile", "context": "apps/prediction-service", "buildArgs": {} }
+}

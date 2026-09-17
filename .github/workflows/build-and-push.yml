@@ -1,0 +1,194 @@
+name: Build and push service images
+
+# CI only — mirrors what the local Jenkins pipeline already did (build,
+# push to Docker Hub, bump the image tag in platform-gitops). It never
+# touches the OKE cluster directly; deploying that tag bump is a separate
+# concern (Terraform for now, ArgoCD once it exists).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Comma-separated service names, or "all"'
+        required: false
+        default: ''
+      web_api_url:
+        description: 'Override NEXT_PUBLIC_API_URL for the web image'
+        required: false
+        default: ''
+
+concurrency:
+  group: build-and-push
+  cancel-in-progress: false
+
+jobs:
+  determine-affected:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.affected.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Same logic as the old Jenkins "Determine affected services" stage:
+      # ask Turborepo which packages actually changed since the previous
+      # commit (dependency-graph aware, not a literal path match), so a
+      # change to a shared packages/* library still marks every service
+      # that depends on it. Falls back to "build everything" on a manual
+      # dispatch with no input, or on the very first push GitHub reports
+      # (github.event.before is all zeros then — no prior commit to diff).
+      - id: affected
+        run: |
+          set -euo pipefail
+          CATALOG=.github/service-catalog.json
+          ALL_SERVICES=$(jq -r 'keys | join(",")' "$CATALOG")
+
+          if [ -n "${{ github.event.inputs.services }}" ]; then
+            RAW="${{ github.event.inputs.services }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              RAW="all"
+            else
+              corepack enable
+              DRY=$(pnpm dlx turbo@^2.3.0 run build --filter="...[${BASE_SHA}]" --dry=json)
+              RAW=$(echo "$DRY" | jq -r '[.packages[] | select(. != "//") | sub("^@ai-notification/"; "")] | join(",")')
+            fi
+          fi
+
+          if [ "$RAW" = "all" ] || [ -z "$RAW" ]; then
+            RAW="$ALL_SERVICES"
+          fi
+
+          echo "Affected services: $RAW"
+          JSON=$(echo "$RAW" | tr ',' '\n' | sed '/^$/d' | jq -R . | jq -sc .)
+          echo "services=$JSON" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: determine-affected
+    if: needs.determine-affected.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Parallel matrix, unlike Jenkins' deliberately serial "one at a time"
+      # loop — that constraint existed because the local Floci Docker
+      # Desktop host couldn't absorb concurrent build load. GitHub-hosted
+      # runners are independent isolated VMs per job, so there's no shared
+      # resource being contended here; parallel is just faster.
+      matrix:
+        service: ${{ fromJson(needs.determine-affected.outputs.services) }}
+    steps:
+      - name: Checkout ai-notification-system
+        uses: actions/checkout@v4
+
+      - name: Checkout platform-gitops
+        uses: actions/checkout@v4
+        with:
+          repository: dip7501686040/platform-gitops
+          path: platform-gitops
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute build params
+        id: params
+        run: |
+          set -euo pipefail
+          SVC="${{ matrix.service }}"
+          CATALOG=.github/service-catalog.json
+          DOCKERFILE=$(jq -r ".\"$SVC\".dockerfile" "$CATALOG")
+          CONTEXT=$(jq -r ".\"$SVC\".context" "$CATALOG")
+          GIT_SHA=$(git rev-parse --short=8 HEAD)
+          # One shared Docker Hub repo, service encoded in the tag — same
+          # naming already used by the images the local Jenkins pipeline
+          # pushed earlier in this project.
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/ai-notification:${SVC}-${GIT_SHA}"
+
+          BUILD_ARGS=""
+          for k in $(jq -r ".\"$SVC\".buildArgs | keys[]?" "$CATALOG"); do
+            v=$(jq -r ".\"$SVC\".buildArgs[\"$k\"]" "$CATALOG")
+            if [ "$k" = "NEXT_PUBLIC_API_URL" ] && [ -n "${{ github.event.inputs.web_api_url }}" ]; then
+              v="${{ github.event.inputs.web_api_url }}"
+            fi
+            BUILD_ARGS="${BUILD_ARGS}${k}=${v}
+          "
+          done
+
+          {
+            echo "dockerfile=$DOCKERFILE"
+            echo "context=$CONTEXT"
+            echo "image=$IMAGE"
+            echo "git_sha=$GIT_SHA"
+            echo "build-args<<BUILDARGS_EOF"
+            printf '%s' "$BUILD_ARGS"
+            echo "BUILDARGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ steps.params.outputs.context }}
+          file: ${{ steps.params.outputs.dockerfile }}
+          push: true
+          tags: ${{ steps.params.outputs.image }}
+          build-args: ${{ steps.params.outputs.build-args }}
+          provenance: false
+          sbom: false
+
+      # Bumps k8s/environments/prod/values-<svc>.yaml in platform-gitops and
+      # pushes — same schemaHash mechanism as before (nest-service chart's
+      # migrate-job.yaml uses it so an unchanged Prisma schema produces the
+      # same PreSync Job, a no-op re-apply instead of a real re-migration).
+      - name: Bump image tag in platform-gitops
+        run: |
+          set -euo pipefail
+          SVC="${{ matrix.service }}"
+          GIT_SHA="${{ steps.params.outputs.git_sha }}"
+          VALUES_FILE="platform-gitops/k8s/environments/prod/values-${SVC}.yaml"
+
+          sed -i "s|^\(\s*repository:\).*|\1 docker.io/${{ secrets.DOCKERHUB_USERNAME }}/ai-notification|" "$VALUES_FILE"
+          sed -i "s|^\(\s*tag:\).*|\1 \"${SVC}-${GIT_SHA}\"|" "$VALUES_FILE"
+
+          SCHEMA_FILE="apps/${SVC}/prisma/schema.prisma"
+          if [ -f "$SCHEMA_FILE" ]; then
+            SCHEMA_HASH=$(sha256sum "$SCHEMA_FILE" | cut -c1-12)
+            sed -i "s|^\(\s*schemaHash:\).*|\1 \"${SCHEMA_HASH}\"|" "$VALUES_FILE"
+          fi
+
+          cd platform-gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "k8s/environments/prod/values-${SVC}.yaml"
+
+          if git diff --cached --quiet; then
+            echo "values-${SVC}.yaml already current for ${SVC} @ ${GIT_SHA} — nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "ci: bump image tag for ${SVC} to ${GIT_SHA}"
+
+          REMOTE="https://x-access-token:${{ secrets.PLATFORM_GITOPS_PUSH_TOKEN }}@github.com/dip7501686040/platform-gitops.git"
+          for attempt in 1 2 3 4 5; do
+            if git push "$REMOTE" HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt) — rebasing onto latest main and retrying"
+            git fetch "$REMOTE" main
+            git rebase FETCH_HEAD
+          done
+          echo "push still failing after 5 attempts"
+          exit 1
