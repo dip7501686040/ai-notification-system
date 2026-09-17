@@ -55,23 +55,35 @@ jobs:
           ALL_SERVICES=$(jq -r 'keys | join(",")' "$CATALOG")
 
           if [ -n "${{ github.event.inputs.services }}" ]; then
+            # Explicit manual input. "all" expands; anything else is used
+            # as-is (an empty string can't reach this branch -- the `-n`
+            # check above already routes that to the workflow_dispatch
+            # no-input case below).
             RAW="${{ github.event.inputs.services }}"
+            if [ "$RAW" = "all" ]; then
+              RAW="$ALL_SERVICES"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual dispatch with no services input at all -- default to
+            # building everything, same as an explicit "all".
+            RAW="$ALL_SERVICES"
           else
             BASE_SHA="${{ github.event.before }}"
             if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-              RAW="all"
+              # No prior commit to diff against (first push GitHub reports).
+              RAW="$ALL_SERVICES"
             else
               corepack enable
               DRY=$(pnpm dlx turbo@^2.3.0 run build --filter="...[${BASE_SHA}]" --dry=json)
               RAW=$(echo "$DRY" | jq -r '[.packages[] | select(. != "//") | sub("^@ai-notification/"; "")] | join(",")')
+              # RAW may legitimately be empty here -- Turborepo found real
+              # changes but none of them touch any service (e.g. only
+              # .github/* or docs changed). That means build nothing, NOT
+              # build everything -- don't fall back to ALL_SERVICES.
             fi
           fi
 
-          if [ "$RAW" = "all" ] || [ -z "$RAW" ]; then
-            RAW="$ALL_SERVICES"
-          fi
-
-          echo "Affected services: $RAW"
+          echo "Affected services: ${RAW:-<none>}"
           JSON=$(echo "$RAW" | tr ',' '\n' | sed '/^$/d' | jq -R . | jq -sc .)
           echo "services=$JSON" >> "$GITHUB_OUTPUT"
 
