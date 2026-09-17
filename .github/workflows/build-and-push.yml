@@ -91,12 +91,23 @@ jobs:
     steps:
       - name: Checkout ai-notification-system
         uses: actions/checkout@v4
+        with:
+          # actions/checkout persists its GITHUB_TOKEN as a *global* git
+          # credential header for github.com by default. That header
+          # silently overrides the explicit PLATFORM_GITOPS_PUSH_TOKEN
+          # credential embedded in the push URL further down (git prefers
+          # the persisted header), and GITHUB_TOKEN has zero access to
+          # platform-gitops — hence a 403 on the push step even though the
+          # token itself is fine. Disabling persistence on both checkouts
+          # avoids that clash entirely.
+          persist-credentials: false
 
       - name: Checkout platform-gitops
         uses: actions/checkout@v4
         with:
           repository: dip7501686040/platform-gitops
           path: platform-gitops
+          persist-credentials: false
 
       - uses: docker/setup-buildx-action@v3
 
