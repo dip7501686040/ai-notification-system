@@ -1,3 +1,6 @@
+// Baked in at build time (NEXT_PUBLIC_*) from .github/service-catalog.json's
+// buildArgs for `web` -- the "http://localhost:8000" fallback below is a
+// local-dev convenience only; prod's build now sets the real value there.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {

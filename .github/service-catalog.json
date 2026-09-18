@@ -10,6 +10,6 @@
   "analytics-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/analytics-service", "APP_DIR": "analytics-service" } },
   "audit-service": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/audit-service", "APP_DIR": "audit-service" } },
   "api-gateway": { "dockerfile": "docker/nest-service.Dockerfile", "context": ".", "buildArgs": { "APP_NAME": "@ai-notification/api-gateway", "APP_DIR": "api-gateway" } },
-  "web": { "dockerfile": "docker/web-service.Dockerfile", "context": ".", "buildArgs": { "NEXT_PUBLIC_API_URL": "http://localhost:8000" } },
+  "web": { "dockerfile": "docker/web-service.Dockerfile", "context": ".", "buildArgs": { "NEXT_PUBLIC_API_URL": "https://ainotification-api.duckdns.org" } },
   "prediction-service": { "dockerfile": "apps/prediction-service/Dockerfile", "context": "apps/prediction-service", "buildArgs": {} }
 }
