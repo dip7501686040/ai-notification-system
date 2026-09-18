@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { LogOut, ShieldCheck } from "lucide-react";
+import { LogOut, ShieldCheck, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -12,12 +14,29 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth-context";
+import { useTenant } from "@/lib/tenant-context";
+import { isDemoUser, resetDemoData } from "@/lib/demo";
 
 export function UserMenu() {
   const { user, logout } = useAuth();
+  const { activeTenant } = useTenant();
+  const [resetting, setResetting] = useState(false);
   if (!user) return null;
 
   const initials = (user.name ?? user.email).slice(0, 2).toUpperCase();
+
+  async function handleReset() {
+    if (!activeTenant) return;
+    setResetting(true);
+    try {
+      await resetDemoData(activeTenant.id);
+      toast.success("Demo data reset — rules, templates, and events are fresh again.");
+    } catch {
+      toast.error("Reset failed — try again shortly.");
+    } finally {
+      setResetting(false);
+    }
+  }
 
   return (
     <DropdownMenu>
@@ -41,6 +60,12 @@ export function UserMenu() {
               <ShieldCheck />
               Platform Admin
             </Link>
+          </DropdownMenuItem>
+        )}
+        {isDemoUser(user.email) && (
+          <DropdownMenuItem onClick={handleReset} disabled={resetting}>
+            <RotateCcw />
+            {resetting ? "Resetting…" : "Reset demo data"}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={logout} variant="destructive">
