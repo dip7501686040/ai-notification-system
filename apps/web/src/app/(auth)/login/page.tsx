@@ -22,6 +22,14 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+// A public, read/write demo tenant ("Acme Retail") pre-seeded with
+// templates, rules, and events, so a visitor sees a populated dashboard
+// immediately. Intentionally visible -- same as any "Try demo" button.
+const DEMO_CREDENTIALS: FormValues = {
+  email: "proof-demo@dipankarsaha.dev",
+  password: "ProofDemo!2026x",
+};
+
 export default function LoginPage() {
   return (
     <Suspense>
@@ -72,6 +80,14 @@ function LoginForm() {
           </p>
         )}
         <GoogleButton href={`${API_URL}/auth/google`} />
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          onClick={() => onSubmit(DEMO_CREDENTIALS)}
+        >
+          Try demo
+        </Button>
         <div className="relative text-center text-xs text-muted-foreground">
           <span className="relative z-10 bg-card px-2">or continue with email</span>
           <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-border" />
