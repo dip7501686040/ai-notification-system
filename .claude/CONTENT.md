@@ -52,3 +52,28 @@ zero gRPC-related errors when typechecking `api-gateway` against the built packa
 - [packages/grpc/src/auth-client.ts](../packages/grpc/src/auth-client.ts) (hottest path: `createAuthClient`, used by `validateTokenViaGrpc`)
 - [packages/grpc/src/tenant-client.ts](../packages/grpc/src/tenant-client.ts) (largest file, 20 call sites touched)
 - Next: PgBouncer (Phase 0b), then ship both via CI and verify via Jaeger/`pg_stat_activity` on the live OCI cluster (Phase 0c) — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
+
+**Problem**: Phase 0b — the other confirmed bottleneck. 9 services × N replicas each open Prisma's
+default connection pool independently against one shared Postgres instance (`max_connections=100`,
+never changed from the image default), so the ceiling scaled with replica count regardless of node
+capacity — no `connection_limit`, no PgBouncer, no shared pooling anywhere (repo lives in
+`platform-gitops`, not this one).
+**Solution**: Added a PgBouncer Deployment+Service to the `backing-services` Helm chart
+(`docker.io/edoburu/pgbouncer:v1.24.1-p1`, wildcard `[databases]` entry via unset `DB_NAME` so all
+9 logical databases route through one instance, `pool_mode=transaction`, `default_pool_size=20`).
+`nest-service`'s `postgresHost`/`postgresPort` now default to `pgbouncer:6432` with `?pgbouncer=true`
+on `DATABASE_URL` (required — disables Prisma's prepared-statement cache, which is incompatible
+with transaction pooling). The migrate Job deliberately does **not** use those values and stays
+hardcoded to `postgres:5432` directly — `prisma migrate deploy` takes a session-scoped Postgres
+advisory lock, which transaction pooling breaks (lock/unlock can land on two different pooled
+connections). Verified with `helm template`/`helm lint` against `identity-service`'s real values
+file: deployment resolves through `pgbouncer:6432`, migrate job resolves through `postgres:5432`,
+both as intended.
+**Resources**:
+
+- `platform-gitops/k8s/charts/backing-services/templates/pgbouncer.yaml`
+- `platform-gitops/k8s/charts/nest-service/values.yaml` (`postgresHost`/`postgresPort`)
+- `platform-gitops/k8s/charts/nest-service/templates/migrate-job.yaml` (the deliberate bypass)
+- Next: Phase 0c — ship both Phase 0a+0b fixes through the existing CI/CD pipeline to the live OCI
+  cluster, verify via Jaeger (per-hop gRPC latency) and `pg_stat_activity` (bounded connection count
+  under load) — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
