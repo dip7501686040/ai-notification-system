@@ -99,3 +99,20 @@ longer produces a false-red CI run.
 - Commit `e9c7254` (ai-notification-system)
 - Next: once ArgoCD finishes syncing all 14 apps, verify via Jaeger + `pg_stat_activity` on the live
   cluster — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
+
+**Problem**: Once ArgoCD synced `backing-services`, the new `pgbouncer` pod crash-looped —
+readiness/liveness probes on port 6432 failed with "connection refused". Container logs showed it
+was actually listening on `0.0.0.0:5432`, not 6432.
+**Solution**: The `edoburu/pgbouncer` image's `DB_PORT` env var only configures the _backend_
+Postgres port pgbouncer connects out to — the port it listens on itself is a separate `LISTEN_PORT`
+env var (undocumented in the README, confirmed by reading `entrypoint.sh` directly), which I hadn't
+set, so it fell back to the image's own default of 5432. Added `LISTEN_PORT: "6432"` to the
+container spec. Confirmed live: new pod's logs show `listening on 0.0.0.0:6432`, then successful
+wildcard auto-database registrations (`notification_db`, `ai_db`, ...) and real connections through
+to Postgres as each service's initContainer started reaching it. `backing-services` ArgoCD app went
+Synced+Healthy; `notification-service` (which had been stuck on `Init:1/2` waiting for pgbouncer)
+recovered on its own within seconds, no restart needed.
+**Resources**:
+
+- `platform-gitops/k8s/charts/backing-services/templates/pgbouncer.yaml` (`LISTEN_PORT`)
+- Commit `8307600` (platform-gitops)
