@@ -78,9 +78,9 @@ At each rung: run the k6 open-model test at that target rate, capture evidence (
 
 Not a sizing exercise (superseded — see "Target ladder" above). Ran `loadtest/mainflow-open.js` against the live, now-fixed OCI deployment purely to capture a "before" reference point. Result: **9.6 req/s sustained, 0% errors, p95 latency 333.96ms** (crossed the 300ms threshold — found the edge), and critically, Prometheus showed **no single pod above 57m CPU** even at peak — the ceiling here is aggregate contention across ~16 pods sharing one 2-OCPU node, not per-pod CPU exhaustion. Full writeup in `.claude/CONTENT.md` (2026-09-23). This number is the "before" side of the AWS scaling story, not an input to AWS sizing math.
 
-### Phase 1 — AWS account safety net
+### Phase 1 — AWS account safety net ✅ Done
 
-Set up AWS Budgets + an escalating alert ladder (same shape as the OCI one: e.g. $5/$10/$25/$50/$100 thresholds on both ACTUAL and FORECASTED), confirmed email subscription. Can happen any time before the first real AWS apply.
+$20/month AWS Budget (`ai-notification-aws-loadtest`) with 5 escalating thresholds — ACTUAL 25%/50%/100%/200%, FORECASTED 100% — email subscription confirmed live via `aws budgets describe-notifications-for-budget` (all 5 in `OK` state). Also set up along the way: AWS CLI v2 + `aws login` (short-lived, auto-rotating credentials — no static access keys), a dedicated `terraform-admin` IAM user instead of using root for CLI/Terraform work, and region switched to `ap-south-1` (Mumbai) to match the OCI side. Config in `platform-infrastructure/aws-budget/`, commit `542982f`.
 
 ### Phase 2 — Fix the AWS Terraform, start at a small baseline size
 
