@@ -77,3 +77,25 @@ both as intended.
 - Next: Phase 0c — ship both Phase 0a+0b fixes through the existing CI/CD pipeline to the live OCI
   cluster, verify via Jaeger (per-hop gRPC latency) and `pg_stat_activity` (bounded connection count
   under load) — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
+
+**Problem**: Phase 0c, shipping the fixes — two unrelated infra hiccups hit along the way, not caused
+by the Phase 0a/0b code itself. (1) `kubectl`/Terraform to the OCI cluster timed out — the recurring
+dynamic-ISP-IP-rotation issue: the OCI security list still allowed the previous IP
+(`103.77.136.5/32`), current one was `103.77.136.208/32`. (2) The GitHub Actions build for
+`0cc64eb` came back `failure` — but only on a spurious `build-and-push (grpc)` matrix job.
+Turborepo's affected-package diff correctly includes every workspace package a change touches, not
+just deployable ones — an isolated `packages/grpc`-only change (no service code touched) surfaced
+`grpc` itself as "affected", which isn't in `.github/service-catalog.json` and has no Dockerfile.
+Every real dependent service (api-gateway, event-service, etc.) built and pushed fine regardless —
+confirmed via `platform-gitops` git log showing all 11 image-tag-bump commits landed.
+**Solution**: (1) Patched the OCI security list in place via `oci network security-list update`
+(surgical — read the full rule set, replaced only the stale-IP ingress rule, left every other rule,
+including OCI-CCM-managed LB rules, untouched). (2) Fixed the workflow to filter Turborepo's affected
+list against the service catalog before building the matrix, so a shared-package-only change no
+longer produces a false-red CI run.
+**Resources**:
+
+- `.github/workflows/build-and-push.yml` (the catalog filter)
+- Commit `e9c7254` (ai-notification-system)
+- Next: once ArgoCD finishes syncing all 14 apps, verify via Jaeger + `pg_stat_activity` on the live
+  cluster — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
