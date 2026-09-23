@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface TenantSummary {
   id: string;
@@ -53,14 +54,16 @@ interface TenantClient extends grpc.Client {
 }
 
 function createClient(address: string): TenantClient {
-  const proto = loadProto("tenant.proto") as unknown as {
-    tenant: { v1: { Tenant: grpc.ServiceClientConstructor } };
-  };
-  const TenantClientCtor = proto.tenant.v1.Tenant;
-  return new TenantClientCtor(
-    address,
-    grpc.credentials.createInsecure(),
-  ) as unknown as TenantClient;
+  return getPooledClient(`tenant:${address}`, () => {
+    const proto = loadProto("tenant.proto") as unknown as {
+      tenant: { v1: { Tenant: grpc.ServiceClientConstructor } };
+    };
+    const TenantClientCtor = proto.tenant.v1.Tenant;
+    return new TenantClientCtor(
+      address,
+      grpc.credentials.createInsecure(),
+    ) as unknown as TenantClient;
+  });
 }
 
 export function getTenantViaGrpc(
@@ -73,8 +76,6 @@ export function getTenantViaGrpc(
     const deadline = new Date(Date.now() + timeoutMs);
 
     client.GetTenant({ tenant_id: tenantId }, { deadline }, (error, response) => {
-      client.close();
-
       if (error || !response.found) {
         resolve({ found: false, tenant: null });
         return;
@@ -108,8 +109,6 @@ export function checkMembershipViaGrpc(
       { tenant_id: tenantId, user_id: userId },
       { deadline },
       (error, response) => {
-        client.close();
-
         if (error) {
           resolve({ isMember: false, role: "" });
           return;
@@ -247,15 +246,11 @@ export async function getTenantForUserViaGrpc(
   tenantId: string,
 ): Promise<TenantResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string },
-      FullTenantWireMessage
-    >(client, "GetTenantForUser", { requester_id: requesterId, tenant_id: tenantId });
-    return toTenantResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string },
+    FullTenantWireMessage
+  >(client, "GetTenantForUser", { requester_id: requesterId, tenant_id: tenantId });
+  return toTenantResult(response);
 }
 
 export async function createTenantViaGrpc(
@@ -264,20 +259,16 @@ export async function createTenantViaGrpc(
   data: { name: string; slug: string; plan?: string },
 ): Promise<TenantResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; name: string; slug: string; plan: string },
-      FullTenantWireMessage
-    >(client, "CreateTenant", {
-      requester_id: requesterId,
-      name: data.name,
-      slug: data.slug,
-      plan: data.plan ?? "",
-    });
-    return toTenantResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; name: string; slug: string; plan: string },
+    FullTenantWireMessage
+  >(client, "CreateTenant", {
+    requester_id: requesterId,
+    name: data.name,
+    slug: data.slug,
+    plan: data.plan ?? "",
+  });
+  return toTenantResult(response);
 }
 
 export async function listTenantsViaGrpc(
@@ -286,20 +277,16 @@ export async function listTenantsViaGrpc(
   query: ListQueryParams,
 ): Promise<PaginatedResult<TenantResult & { role: string }>> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; query: ListQueryWireMessage },
-      ListTenantsWireResponse
-    >(client, "ListTenants", { requester_id: requesterId, query: toQueryWire(query) });
-    return {
-      list: response.list.map((item) => ({ ...toTenantResult(item.tenant), role: item.role })),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; query: ListQueryWireMessage },
+    ListTenantsWireResponse
+  >(client, "ListTenants", { requester_id: requesterId, query: toQueryWire(query) });
+  return {
+    list: response.list.map((item) => ({ ...toTenantResult(item.tenant), role: item.role })),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function updateTenantViaGrpc(
@@ -309,29 +296,25 @@ export async function updateTenantViaGrpc(
   data: { name?: string; plan?: string; status?: string; settings?: unknown },
 ): Promise<TenantResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        name: string;
-        plan: string;
-        status: string;
-        settings_json: string;
-      },
-      FullTenantWireMessage
-    >(client, "UpdateTenant", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      name: data.name ?? "",
-      plan: data.plan ?? "",
-      status: data.status ?? "",
-      settings_json: data.settings !== undefined ? JSON.stringify(data.settings) : "",
-    });
-    return toTenantResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      name: string;
+      plan: string;
+      status: string;
+      settings_json: string;
+    },
+    FullTenantWireMessage
+  >(client, "UpdateTenant", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    name: data.name ?? "",
+    plan: data.plan ?? "",
+    status: data.status ?? "",
+    settings_json: data.settings !== undefined ? JSON.stringify(data.settings) : "",
+  });
+  return toTenantResult(response);
 }
 
 export async function deleteTenantViaGrpc(
@@ -340,15 +323,11 @@ export async function deleteTenantViaGrpc(
   tenantId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<{ requester_id: string; tenant_id: string }, SuccessWireResponse>(
-      client,
-      "DeleteTenant",
-      { requester_id: requesterId, tenant_id: tenantId },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ requester_id: string; tenant_id: string }, SuccessWireResponse>(
+    client,
+    "DeleteTenant",
+    { requester_id: requesterId, tenant_id: tenantId },
+  );
 }
 
 export async function listMembersViaGrpc(
@@ -358,24 +337,20 @@ export async function listMembersViaGrpc(
   query: ListQueryParams,
 ): Promise<PaginatedResult<TenantMemberResult>> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListMembersWireResponse
-    >(client, "ListMembers", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toMemberResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListMembersWireResponse
+  >(client, "ListMembers", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toMemberResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function addMemberViaGrpc(
@@ -385,20 +360,16 @@ export async function addMemberViaGrpc(
   data: { userId: string; role?: string },
 ): Promise<TenantMemberResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; user_id: string; role: string },
-      MemberWireMessage
-    >(client, "AddMember", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      user_id: data.userId,
-      role: data.role ?? "",
-    });
-    return toMemberResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; user_id: string; role: string },
+    MemberWireMessage
+  >(client, "AddMember", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    user_id: data.userId,
+    role: data.role ?? "",
+  });
+  return toMemberResult(response);
 }
 
 export async function updateMemberRoleViaGrpc(
@@ -409,20 +380,16 @@ export async function updateMemberRoleViaGrpc(
   role: string,
 ): Promise<TenantMemberResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; user_id: string; role: string },
-      MemberWireMessage
-    >(client, "UpdateMemberRole", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      user_id: userId,
-      role,
-    });
-    return toMemberResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; user_id: string; role: string },
+    MemberWireMessage
+  >(client, "UpdateMemberRole", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    user_id: userId,
+    role,
+  });
+  return toMemberResult(response);
 }
 
 export async function removeMemberViaGrpc(
@@ -432,14 +399,10 @@ export async function removeMemberViaGrpc(
   userId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<
-      { requester_id: string; tenant_id: string; user_id: string },
-      SuccessWireResponse
-    >(client, "RemoveMember", { requester_id: requesterId, tenant_id: tenantId, user_id: userId });
-  } finally {
-    client.close();
-  }
+  await callUnary<
+    { requester_id: string; tenant_id: string; user_id: string },
+    SuccessWireResponse
+  >(client, "RemoveMember", { requester_id: requesterId, tenant_id: tenantId, user_id: userId });
 }
 
 export interface ApiKeyResult {
@@ -518,20 +481,16 @@ export async function createApiKeyViaGrpc(
   data: { name: string; rateLimit?: number },
 ): Promise<CreatedApiKeyResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; name: string; rate_limit: number },
-      CreateOrRotateApiKeyWireResponse
-    >(client, "CreateApiKey", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      name: data.name,
-      rate_limit: data.rateLimit ?? 0,
-    });
-    return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; name: string; rate_limit: number },
+    CreateOrRotateApiKeyWireResponse
+  >(client, "CreateApiKey", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    name: data.name,
+    rate_limit: data.rateLimit ?? 0,
+  });
+  return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
 }
 
 export async function listApiKeysViaGrpc(
@@ -541,24 +500,20 @@ export async function listApiKeysViaGrpc(
   query: ListQueryParams,
 ): Promise<PaginatedResult<ApiKeyResult>> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListApiKeysWireResponse
-    >(client, "ListApiKeys", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toApiKeyResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListApiKeysWireResponse
+  >(client, "ListApiKeys", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toApiKeyResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function rotateApiKeyViaGrpc(
@@ -567,15 +522,11 @@ export async function rotateApiKeyViaGrpc(
   apiKeyId: string,
 ): Promise<CreatedApiKeyResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; api_key_id: string },
-      CreateOrRotateApiKeyWireResponse
-    >(client, "RotateApiKey", { requester_id: requesterId, api_key_id: apiKeyId });
-    return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; api_key_id: string },
+    CreateOrRotateApiKeyWireResponse
+  >(client, "RotateApiKey", { requester_id: requesterId, api_key_id: apiKeyId });
+  return { apiKey: toApiKeyResult(response.api_key), rawKey: response.raw_key };
 }
 
 export async function revokeApiKeyViaGrpc(
@@ -584,15 +535,11 @@ export async function revokeApiKeyViaGrpc(
   apiKeyId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<{ requester_id: string; api_key_id: string }, SuccessWireResponse>(
-      client,
-      "RevokeApiKey",
-      { requester_id: requesterId, api_key_id: apiKeyId },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ requester_id: string; api_key_id: string }, SuccessWireResponse>(
+    client,
+    "RevokeApiKey",
+    { requester_id: requesterId, api_key_id: apiKeyId },
+  );
 }
 
 // Internal-only (no requesterId) -- called by api-gateway's guard.
@@ -601,21 +548,17 @@ export async function validateApiKeyViaGrpc(
   rawKey: string,
 ): Promise<ValidateApiKeyResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<{ raw_key: string }, ValidateApiKeyWireResponse>(
-      client,
-      "ValidateApiKey",
-      { raw_key: rawKey },
-    );
-    return {
-      valid: response.valid,
-      tenantId: response.tenant_id,
-      apiKeyId: response.api_key_id,
-      rateLimit: response.rate_limit,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<{ raw_key: string }, ValidateApiKeyWireResponse>(
+    client,
+    "ValidateApiKey",
+    { raw_key: rawKey },
+  );
+  return {
+    valid: response.valid,
+    tenantId: response.tenant_id,
+    apiKeyId: response.api_key_id,
+    rateLimit: response.rate_limit,
+  };
 }
 
 interface ListAllTenantsWireResponse {
@@ -633,20 +576,16 @@ export async function listAllTenantsViaGrpc(
   query: ListQueryParams,
 ): Promise<PaginatedResult<TenantResult>> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; query: ListQueryWireMessage },
-      ListAllTenantsWireResponse
-    >(client, "ListAllTenants", { requester_id: requesterId, query: toQueryWire(query) });
-    return {
-      list: response.list.map(toTenantResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; query: ListQueryWireMessage },
+    ListAllTenantsWireResponse
+  >(client, "ListAllTenants", { requester_id: requesterId, query: toQueryWire(query) });
+  return {
+    list: response.list.map(toTenantResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function setTenantStatusViaGrpc(
@@ -656,15 +595,11 @@ export async function setTenantStatusViaGrpc(
   status: string,
 ): Promise<TenantResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; status: string },
-      FullTenantWireMessage
-    >(client, "SetTenantStatus", { requester_id: requesterId, tenant_id: tenantId, status });
-    return toTenantResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; status: string },
+    FullTenantWireMessage
+  >(client, "SetTenantStatus", { requester_id: requesterId, tenant_id: tenantId, status });
+  return toTenantResult(response);
 }
 
 interface BillingUrlWireResponse {
@@ -678,14 +613,10 @@ export async function createCheckoutSessionViaGrpc(
   plan: string,
 ): Promise<{ url: string }> {
   const client = createClient(address);
-  try {
-    return await callUnary<
-      { requester_id: string; tenant_id: string; plan: string },
-      BillingUrlWireResponse
-    >(client, "CreateCheckoutSession", { requester_id: requesterId, tenant_id: tenantId, plan });
-  } finally {
-    client.close();
-  }
+  return await callUnary<
+    { requester_id: string; tenant_id: string; plan: string },
+    BillingUrlWireResponse
+  >(client, "CreateCheckoutSession", { requester_id: requesterId, tenant_id: tenantId, plan });
 }
 
 export async function createPortalSessionViaGrpc(
@@ -694,15 +625,11 @@ export async function createPortalSessionViaGrpc(
   tenantId: string,
 ): Promise<{ url: string }> {
   const client = createClient(address);
-  try {
-    return await callUnary<{ requester_id: string; tenant_id: string }, BillingUrlWireResponse>(
-      client,
-      "CreatePortalSession",
-      { requester_id: requesterId, tenant_id: tenantId },
-    );
-  } finally {
-    client.close();
-  }
+  return await callUnary<{ requester_id: string; tenant_id: string }, BillingUrlWireResponse>(
+    client,
+    "CreatePortalSession",
+    { requester_id: requesterId, tenant_id: tenantId },
+  );
 }
 
 export async function cancelSubscriptionViaGrpc(
@@ -711,15 +638,11 @@ export async function cancelSubscriptionViaGrpc(
   tenantId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<{ requester_id: string; tenant_id: string }, SuccessWireResponse>(
-      client,
-      "CancelSubscription",
-      { requester_id: requesterId, tenant_id: tenantId },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ requester_id: string; tenant_id: string }, SuccessWireResponse>(
+    client,
+    "CancelSubscription",
+    { requester_id: requesterId, tenant_id: tenantId },
+  );
 }
 
 // Internal-only (no requesterId) -- called by api-gateway's Stripe
@@ -732,17 +655,13 @@ export async function applyStripeWebhookEventViaGrpc(
   subscriptionId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<
-      { kind: string; tenant_id: string; plan: string; subscription_id: string },
-      SuccessWireResponse
-    >(client, "ApplyStripeWebhookEvent", {
-      kind,
-      tenant_id: tenantId,
-      plan,
-      subscription_id: subscriptionId,
-    });
-  } finally {
-    client.close();
-  }
+  await callUnary<
+    { kind: string; tenant_id: string; plan: string; subscription_id: string },
+    SuccessWireResponse
+  >(client, "ApplyStripeWebhookEvent", {
+    kind,
+    tenant_id: tenantId,
+    plan,
+    subscription_id: subscriptionId,
+  });
 }

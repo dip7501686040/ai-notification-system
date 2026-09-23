@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface NotificationResult {
   id: string;
@@ -73,10 +74,12 @@ interface ListNotificationsWireResponse {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("notification.proto") as unknown as {
-    notification: { v1: { Notification: grpc.ServiceClientConstructor } };
-  };
-  return new proto.notification.v1.Notification(address, grpc.credentials.createInsecure());
+  return getPooledClient(`notification:${address}`, () => {
+    const proto = loadProto("notification.proto") as unknown as {
+      notification: { v1: { Notification: grpc.ServiceClientConstructor } };
+    };
+    return new proto.notification.v1.Notification(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toNotificationResult(wire: NotificationWireMessage): NotificationResult {
@@ -119,32 +122,28 @@ export async function listNotificationsViaGrpc(
   readStatus?: string,
 ): Promise<PaginatedNotificationsResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        status: string;
-        query: ListQueryWireMessage;
-        read_status: string;
-      },
-      ListNotificationsWireResponse
-    >(client, "ListNotifications", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      status: status ?? "",
-      query: toQueryWire(query),
-      read_status: readStatus ?? "",
-    });
-    return {
-      list: response.list.map(toNotificationResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      status: string;
+      query: ListQueryWireMessage;
+      read_status: string;
+    },
+    ListNotificationsWireResponse
+  >(client, "ListNotifications", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    status: status ?? "",
+    query: toQueryWire(query),
+    read_status: readStatus ?? "",
+  });
+  return {
+    list: response.list.map(toNotificationResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function getNotificationViaGrpc(
@@ -153,15 +152,11 @@ export async function getNotificationViaGrpc(
   notificationId: string,
 ): Promise<NotificationResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; notification_id: string },
-      NotificationWireMessage
-    >(client, "GetNotification", { requester_id: requesterId, notification_id: notificationId });
-    return toNotificationResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; notification_id: string },
+    NotificationWireMessage
+  >(client, "GetNotification", { requester_id: requesterId, notification_id: notificationId });
+  return toNotificationResult(response);
 }
 
 export async function markNotificationReadViaGrpc(
@@ -170,16 +165,12 @@ export async function markNotificationReadViaGrpc(
   notificationId: string,
 ): Promise<NotificationResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; notification_id: string },
-      NotificationWireMessage
-    >(client, "MarkNotificationRead", {
-      requester_id: requesterId,
-      notification_id: notificationId,
-    });
-    return toNotificationResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; notification_id: string },
+    NotificationWireMessage
+  >(client, "MarkNotificationRead", {
+    requester_id: requesterId,
+    notification_id: notificationId,
+  });
+  return toNotificationResult(response);
 }

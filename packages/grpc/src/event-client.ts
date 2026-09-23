@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface EventResult {
   id: string;
@@ -69,13 +70,15 @@ interface EventClient extends grpc.Client {
 }
 
 function createClient(address: string): EventClient {
-  const proto = loadProto("event.proto") as unknown as {
-    event: { v1: { Event: grpc.ServiceClientConstructor } };
-  };
-  return new proto.event.v1.Event(
-    address,
-    grpc.credentials.createInsecure(),
-  ) as unknown as EventClient;
+  return getPooledClient(`event:${address}`, () => {
+    const proto = loadProto("event.proto") as unknown as {
+      event: { v1: { Event: grpc.ServiceClientConstructor } };
+    };
+    return new proto.event.v1.Event(
+      address,
+      grpc.credentials.createInsecure(),
+    ) as unknown as EventClient;
+  });
 }
 
 function toEventResult(wire: EventWireMessage): EventResult {
@@ -106,27 +109,23 @@ export async function createEventViaGrpc(
   data: { tenantId: string; type: string; source?: string; payload: unknown },
 ): Promise<EventResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        type: string;
-        source: string;
-        payload_json: string;
-      },
-      EventWireMessage
-    >(client, "CreateEvent", {
-      requester_id: requesterId,
-      tenant_id: data.tenantId,
-      type: data.type,
-      source: data.source ?? "",
-      payload_json: JSON.stringify(data.payload),
-    });
-    return toEventResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      type: string;
+      source: string;
+      payload_json: string;
+    },
+    EventWireMessage
+  >(client, "CreateEvent", {
+    requester_id: requesterId,
+    tenant_id: data.tenantId,
+    type: data.type,
+    source: data.source ?? "",
+    payload_json: JSON.stringify(data.payload),
+  });
+  return toEventResult(response);
 }
 
 export async function listEventsViaGrpc(
@@ -136,24 +135,20 @@ export async function listEventsViaGrpc(
   query: EventListQueryParams,
 ): Promise<PaginatedEventsResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListEventsWireResponse
-    >(client, "ListEvents", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toEventResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListEventsWireResponse
+  >(client, "ListEvents", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toEventResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function getEventViaGrpc(
@@ -162,16 +157,12 @@ export async function getEventViaGrpc(
   eventId: string,
 ): Promise<EventResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<{ requester_id: string; event_id: string }, EventWireMessage>(
-      client,
-      "GetEvent",
-      { requester_id: requesterId, event_id: eventId },
-    );
-    return toEventResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<{ requester_id: string; event_id: string }, EventWireMessage>(
+    client,
+    "GetEvent",
+    { requester_id: requesterId, event_id: eventId },
+  );
+  return toEventResult(response);
 }
 
 // Internal-only (no requesterId) -- tenantId here is the already-trusted
@@ -182,18 +173,14 @@ export async function ingestEventViaApiKeyGrpc(
   data: { type: string; source?: string; payload: unknown },
 ): Promise<EventResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { tenant_id: string; type: string; source: string; payload_json: string },
-      EventWireMessage
-    >(client, "IngestViaApiKey", {
-      tenant_id: tenantId,
-      type: data.type,
-      source: data.source ?? "",
-      payload_json: JSON.stringify(data.payload),
-    });
-    return toEventResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { tenant_id: string; type: string; source: string; payload_json: string },
+    EventWireMessage
+  >(client, "IngestViaApiKey", {
+    tenant_id: tenantId,
+    type: data.type,
+    source: data.source ?? "",
+    payload_json: JSON.stringify(data.payload),
+  });
+  return toEventResult(response);
 }

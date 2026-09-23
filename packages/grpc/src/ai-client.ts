@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface EventAnalysisResult {
   id: string;
@@ -89,10 +90,12 @@ interface AiConfigWireMessage {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("ai.proto") as unknown as {
-    ai: { v1: { AiAnalysis: grpc.ServiceClientConstructor } };
-  };
-  return new proto.ai.v1.AiAnalysis(address, grpc.credentials.createInsecure());
+  return getPooledClient(`ai:${address}`, () => {
+    const proto = loadProto("ai.proto") as unknown as {
+      ai: { v1: { AiAnalysis: grpc.ServiceClientConstructor } };
+    };
+    return new proto.ai.v1.AiAnalysis(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toEventAnalysisResult(wire: EventAnalysisWireMessage): EventAnalysisResult {
@@ -139,24 +142,20 @@ export async function listEventAnalysesViaGrpc(
   query: EventAnalysisListQueryParams,
 ): Promise<PaginatedEventAnalysesResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListEventAnalysesWireResponse
-    >(client, "ListEventAnalyses", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toEventAnalysisResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListEventAnalysesWireResponse
+  >(client, "ListEventAnalyses", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toEventAnalysisResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function getEventAnalysisViaGrpc(
@@ -165,15 +164,11 @@ export async function getEventAnalysisViaGrpc(
   analysisId: string,
 ): Promise<EventAnalysisResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; analysis_id: string },
-      EventAnalysisWireMessage
-    >(client, "GetEventAnalysis", { requester_id: requesterId, analysis_id: analysisId });
-    return toEventAnalysisResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; analysis_id: string },
+    EventAnalysisWireMessage
+  >(client, "GetEventAnalysis", { requester_id: requesterId, analysis_id: analysisId });
+  return toEventAnalysisResult(response);
 }
 
 export async function getEventAnalysisByEventViaGrpc(
@@ -182,15 +177,11 @@ export async function getEventAnalysisByEventViaGrpc(
   eventId: string,
 ): Promise<EventAnalysisResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; event_id: string },
-      EventAnalysisWireMessage
-    >(client, "GetEventAnalysisByEvent", { requester_id: requesterId, event_id: eventId });
-    return toEventAnalysisResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; event_id: string },
+    EventAnalysisWireMessage
+  >(client, "GetEventAnalysisByEvent", { requester_id: requesterId, event_id: eventId });
+  return toEventAnalysisResult(response);
 }
 
 export async function getAiConfigViaGrpc(
@@ -199,15 +190,11 @@ export async function getAiConfigViaGrpc(
   tenantId: string,
 ): Promise<AiConfigResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string },
-      AiConfigWireMessage
-    >(client, "GetAiConfig", { requester_id: requesterId, tenant_id: tenantId });
-    return toAiConfigResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string },
+    AiConfigWireMessage
+  >(client, "GetAiConfig", { requester_id: requesterId, tenant_id: tenantId });
+  return toAiConfigResult(response);
 }
 
 export async function setAiConfigViaGrpc(
@@ -218,18 +205,14 @@ export async function setAiConfigViaGrpc(
   model: string,
 ): Promise<AiConfigResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; provider: string; model: string },
-      AiConfigWireMessage
-    >(client, "SetAiConfig", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      provider,
-      model,
-    });
-    return toAiConfigResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; provider: string; model: string },
+    AiConfigWireMessage
+  >(client, "SetAiConfig", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    provider,
+    model,
+  });
+  return toAiConfigResult(response);
 }

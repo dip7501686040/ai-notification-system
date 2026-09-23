@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface TemplateResult {
   id: string;
@@ -71,10 +72,12 @@ interface RenderTemplateWireResponse {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("template.proto") as unknown as {
-    template: { v1: { Template: grpc.ServiceClientConstructor } };
-  };
-  return new proto.template.v1.Template(address, grpc.credentials.createInsecure());
+  return getPooledClient(`template:${address}`, () => {
+    const proto = loadProto("template.proto") as unknown as {
+      template: { v1: { Template: grpc.ServiceClientConstructor } };
+    };
+    return new proto.template.v1.Template(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toTemplateResult(wire: TemplateWireMessage): TemplateResult {
@@ -112,29 +115,25 @@ export async function createTemplateViaGrpc(
   },
 ): Promise<TemplateResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        name: string;
-        channel: string;
-        subject: string;
-        body: string;
-      },
-      TemplateWireMessage
-    >(client, "CreateTemplate", {
-      requester_id: requesterId,
-      tenant_id: data.tenantId,
-      name: data.name,
-      channel: data.channel,
-      subject: data.subject ?? "",
-      body: data.body,
-    });
-    return toTemplateResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      name: string;
+      channel: string;
+      subject: string;
+      body: string;
+    },
+    TemplateWireMessage
+  >(client, "CreateTemplate", {
+    requester_id: requesterId,
+    tenant_id: data.tenantId,
+    name: data.name,
+    channel: data.channel,
+    subject: data.subject ?? "",
+    body: data.body,
+  });
+  return toTemplateResult(response);
 }
 
 export async function listTemplatesViaGrpc(
@@ -144,24 +143,20 @@ export async function listTemplatesViaGrpc(
   query: TemplateListQueryParams,
 ): Promise<PaginatedTemplatesResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListTemplatesWireResponse
-    >(client, "ListTemplates", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toTemplateResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListTemplatesWireResponse
+  >(client, "ListTemplates", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toTemplateResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function getTemplateViaGrpc(
@@ -170,15 +165,11 @@ export async function getTemplateViaGrpc(
   templateId: string,
 ): Promise<TemplateResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; template_id: string },
-      TemplateWireMessage
-    >(client, "GetTemplate", { requester_id: requesterId, template_id: templateId });
-    return toTemplateResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; template_id: string },
+    TemplateWireMessage
+  >(client, "GetTemplate", { requester_id: requesterId, template_id: templateId });
+  return toTemplateResult(response);
 }
 
 export async function updateTemplateViaGrpc(
@@ -193,29 +184,25 @@ export async function updateTemplateViaGrpc(
   },
 ): Promise<TemplateResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        template_id: string;
-        name: string;
-        channel: string;
-        subject: string;
-        body: string;
-      },
-      TemplateWireMessage
-    >(client, "UpdateTemplate", {
-      requester_id: requesterId,
-      template_id: templateId,
-      name: data.name ?? "",
-      channel: data.channel ?? "",
-      subject: data.subject ?? "",
-      body: data.body ?? "",
-    });
-    return toTemplateResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      template_id: string;
+      name: string;
+      channel: string;
+      subject: string;
+      body: string;
+    },
+    TemplateWireMessage
+  >(client, "UpdateTemplate", {
+    requester_id: requesterId,
+    template_id: templateId,
+    name: data.name ?? "",
+    channel: data.channel ?? "",
+    subject: data.subject ?? "",
+    body: data.body ?? "",
+  });
+  return toTemplateResult(response);
 }
 
 export async function deleteTemplateViaGrpc(
@@ -224,15 +211,11 @@ export async function deleteTemplateViaGrpc(
   templateId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<{ requester_id: string; template_id: string }, SuccessWireResponse>(
-      client,
-      "DeleteTemplate",
-      { requester_id: requesterId, template_id: templateId },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ requester_id: string; template_id: string }, SuccessWireResponse>(
+    client,
+    "DeleteTemplate",
+    { requester_id: requesterId, template_id: templateId },
+  );
 }
 
 // Internal-only (no requesterId) -- called by notification-service, not
@@ -245,18 +228,14 @@ export async function renderTemplateViaGrpc(
   variables: Record<string, unknown>,
 ): Promise<RenderTemplateResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { tenant_id: string; name: string; channel: string; variables_json: string },
-      RenderTemplateWireResponse
-    >(client, "RenderTemplate", {
-      tenant_id: tenantId,
-      name,
-      channel,
-      variables_json: JSON.stringify(variables),
-    });
-    return response;
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { tenant_id: string; name: string; channel: string; variables_json: string },
+    RenderTemplateWireResponse
+  >(client, "RenderTemplate", {
+    tenant_id: tenantId,
+    name,
+    channel,
+    variables_json: JSON.stringify(variables),
+  });
+  return response;
 }

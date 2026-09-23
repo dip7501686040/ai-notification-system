@@ -1,4 +1,5 @@
 export * from "./proto";
+export * from "./channel-pool";
 export * from "./health.controller";
 export * from "./health-microservice";
 export * from "./health-client";

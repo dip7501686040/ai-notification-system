@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface RuleResult {
   id: string;
@@ -63,10 +64,12 @@ interface SuccessWireResponse {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("rule.proto") as unknown as {
-    rule: { v1: { Rule: grpc.ServiceClientConstructor } };
-  };
-  return new proto.rule.v1.Rule(address, grpc.credentials.createInsecure());
+  return getPooledClient(`rule:${address}`, () => {
+    const proto = loadProto("rule.proto") as unknown as {
+      rule: { v1: { Rule: grpc.ServiceClientConstructor } };
+    };
+    return new proto.rule.v1.Rule(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toRuleResult(wire: RuleWireMessage): RuleResult {
@@ -110,31 +113,27 @@ export async function createRuleViaGrpc(
   },
 ): Promise<RuleResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        name: string;
-        event_type: string;
-        conditions_json: string;
-        actions_json: string;
-        enabled_state: string;
-      },
-      RuleWireMessage
-    >(client, "CreateRule", {
-      requester_id: requesterId,
-      tenant_id: data.tenantId,
-      name: data.name,
-      event_type: data.eventType,
-      conditions_json: data.conditions !== undefined ? JSON.stringify(data.conditions) : "",
-      actions_json: JSON.stringify(data.actions),
-      enabled_state: toEnabledState(data.enabled),
-    });
-    return toRuleResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      name: string;
+      event_type: string;
+      conditions_json: string;
+      actions_json: string;
+      enabled_state: string;
+    },
+    RuleWireMessage
+  >(client, "CreateRule", {
+    requester_id: requesterId,
+    tenant_id: data.tenantId,
+    name: data.name,
+    event_type: data.eventType,
+    conditions_json: data.conditions !== undefined ? JSON.stringify(data.conditions) : "",
+    actions_json: JSON.stringify(data.actions),
+    enabled_state: toEnabledState(data.enabled),
+  });
+  return toRuleResult(response);
 }
 
 export async function listRulesViaGrpc(
@@ -144,24 +143,20 @@ export async function listRulesViaGrpc(
   query: RuleListQueryParams,
 ): Promise<PaginatedRulesResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
-      ListRulesWireResponse
-    >(client, "ListRules", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-    });
-    return {
-      list: response.list.map(toRuleResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; query: ListQueryWireMessage },
+    ListRulesWireResponse
+  >(client, "ListRules", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+  });
+  return {
+    list: response.list.map(toRuleResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function getRuleViaGrpc(
@@ -170,16 +165,12 @@ export async function getRuleViaGrpc(
   ruleId: string,
 ): Promise<RuleResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<{ requester_id: string; rule_id: string }, RuleWireMessage>(
-      client,
-      "GetRule",
-      { requester_id: requesterId, rule_id: ruleId },
-    );
-    return toRuleResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<{ requester_id: string; rule_id: string }, RuleWireMessage>(
+    client,
+    "GetRule",
+    { requester_id: requesterId, rule_id: ruleId },
+  );
+  return toRuleResult(response);
 }
 
 export async function updateRuleViaGrpc(
@@ -195,31 +186,27 @@ export async function updateRuleViaGrpc(
   },
 ): Promise<RuleResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        rule_id: string;
-        name: string;
-        event_type: string;
-        conditions_json: string;
-        actions_json: string;
-        enabled_state: string;
-      },
-      RuleWireMessage
-    >(client, "UpdateRule", {
-      requester_id: requesterId,
-      rule_id: ruleId,
-      name: data.name ?? "",
-      event_type: data.eventType ?? "",
-      conditions_json: data.conditions !== undefined ? JSON.stringify(data.conditions) : "",
-      actions_json: data.actions !== undefined ? JSON.stringify(data.actions) : "",
-      enabled_state: toEnabledState(data.enabled),
-    });
-    return toRuleResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      rule_id: string;
+      name: string;
+      event_type: string;
+      conditions_json: string;
+      actions_json: string;
+      enabled_state: string;
+    },
+    RuleWireMessage
+  >(client, "UpdateRule", {
+    requester_id: requesterId,
+    rule_id: ruleId,
+    name: data.name ?? "",
+    event_type: data.eventType ?? "",
+    conditions_json: data.conditions !== undefined ? JSON.stringify(data.conditions) : "",
+    actions_json: data.actions !== undefined ? JSON.stringify(data.actions) : "",
+    enabled_state: toEnabledState(data.enabled),
+  });
+  return toRuleResult(response);
 }
 
 export async function deleteRuleViaGrpc(
@@ -228,15 +215,11 @@ export async function deleteRuleViaGrpc(
   ruleId: string,
 ): Promise<void> {
   const client = createClient(address);
-  try {
-    await callUnary<{ requester_id: string; rule_id: string }, SuccessWireResponse>(
-      client,
-      "DeleteRule",
-      { requester_id: requesterId, rule_id: ruleId },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ requester_id: string; rule_id: string }, SuccessWireResponse>(
+    client,
+    "DeleteRule",
+    { requester_id: requesterId, rule_id: ruleId },
+  );
 }
 
 export async function hasMatchingRuleViaGrpc(
@@ -245,13 +228,9 @@ export async function hasMatchingRuleViaGrpc(
   eventType: string,
 ): Promise<boolean> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { tenant_id: string; event_type: string },
-      { has_match: boolean }
-    >(client, "HasMatchingRule", { tenant_id: tenantId, event_type: eventType });
-    return response.has_match;
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { tenant_id: string; event_type: string },
+    { has_match: boolean }
+  >(client, "HasMatchingRule", { tenant_id: tenantId, event_type: eventType });
+  return response.has_match;
 }

@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface AuditLogResult {
   id: string;
@@ -55,10 +56,12 @@ interface ListAuditLogsWireResponse {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("audit.proto") as unknown as {
-    audit: { v1: { Audit: grpc.ServiceClientConstructor } };
-  };
-  return new proto.audit.v1.Audit(address, grpc.credentials.createInsecure());
+  return getPooledClient(`audit:${address}`, () => {
+    const proto = loadProto("audit.proto") as unknown as {
+      audit: { v1: { Audit: grpc.ServiceClientConstructor } };
+    };
+    return new proto.audit.v1.Audit(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toAuditLogResult(wire: AuditLogWireMessage): AuditLogResult {
@@ -93,32 +96,28 @@ export async function listAuditLogsViaGrpc(
   action?: string,
 ): Promise<PaginatedAuditLogsResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      {
-        requester_id: string;
-        tenant_id: string;
-        query: ListQueryWireMessage;
-        days: number;
-        action: string;
-      },
-      ListAuditLogsWireResponse
-    >(client, "ListAuditLogs", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      query: toQueryWire(query),
-      days: days ?? 0,
-      action: action ?? "",
-    });
-    return {
-      list: response.list.map(toAuditLogResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    {
+      requester_id: string;
+      tenant_id: string;
+      query: ListQueryWireMessage;
+      days: number;
+      action: string;
+    },
+    ListAuditLogsWireResponse
+  >(client, "ListAuditLogs", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    query: toQueryWire(query),
+    days: days ?? 0,
+    action: action ?? "",
+  });
+  return {
+    list: response.list.map(toAuditLogResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }
 
 export async function listMyAuditLogsViaGrpc(
@@ -128,22 +127,18 @@ export async function listMyAuditLogsViaGrpc(
   days?: number,
 ): Promise<PaginatedAuditLogsResult> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; query: ListQueryWireMessage; days: number },
-      ListAuditLogsWireResponse
-    >(client, "ListMyAuditLogs", {
-      requester_id: requesterId,
-      query: toQueryWire(query),
-      days: days ?? 0,
-    });
-    return {
-      list: response.list.map(toAuditLogResult),
-      total: response.total,
-      page: response.page,
-      pageSize: response.page_size,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; query: ListQueryWireMessage; days: number },
+    ListAuditLogsWireResponse
+  >(client, "ListMyAuditLogs", {
+    requester_id: requesterId,
+    query: toQueryWire(query),
+    days: days ?? 0,
+  });
+  return {
+    list: response.list.map(toAuditLogResult),
+    total: response.total,
+    page: response.page,
+    pageSize: response.page_size,
+  };
 }

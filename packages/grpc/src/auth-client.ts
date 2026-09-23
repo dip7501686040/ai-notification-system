@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface ValidateTokenResult {
   valid: boolean;
@@ -35,19 +36,10 @@ export function validateTokenViaGrpc(
   timeoutMs = 3000,
 ): Promise<ValidateTokenResult> {
   return new Promise((resolve) => {
-    const proto = loadProto("auth.proto") as unknown as {
-      auth: { v1: { Auth: grpc.ServiceClientConstructor } };
-    };
-    const AuthClientCtor = proto.auth.v1.Auth;
-    const client = new AuthClientCtor(
-      address,
-      grpc.credentials.createInsecure(),
-    ) as unknown as AuthClient;
+    const client = createAuthClient(address) as unknown as AuthClient;
     const deadline = new Date(Date.now() + timeoutMs);
 
     client.ValidateToken({ token }, { deadline }, (error, response) => {
-      client.close();
-
       if (error) {
         resolve({ valid: false, userId: "", email: "", isSuperAdmin: false, error: error.message });
         return;
@@ -91,10 +83,12 @@ interface AuthResultWireMessage {
 }
 
 function createAuthClient(address: string): grpc.Client {
-  const proto = loadProto("auth.proto") as unknown as {
-    auth: { v1: { Auth: grpc.ServiceClientConstructor } };
-  };
-  return new proto.auth.v1.Auth(address, grpc.credentials.createInsecure());
+  return getPooledClient(`auth:${address}`, () => {
+    const proto = loadProto("auth.proto") as unknown as {
+      auth: { v1: { Auth: grpc.ServiceClientConstructor } };
+    };
+    return new proto.auth.v1.Auth(address, grpc.credentials.createInsecure());
+  });
 }
 
 function toAuthUser(wire: UserWireMessage): AuthUser {
@@ -118,15 +112,11 @@ export async function registerViaGrpc(
   name?: string,
 ): Promise<AuthResult> {
   const client = createAuthClient(address);
-  try {
-    const response = await callUnary<
-      { email: string; password: string; name: string },
-      AuthResultWireMessage
-    >(client, "Register", { email, password, name: name ?? "" });
-    return toAuthResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { email: string; password: string; name: string },
+    AuthResultWireMessage
+  >(client, "Register", { email, password, name: name ?? "" });
+  return toAuthResult(response);
 }
 
 export async function loginViaGrpc(
@@ -135,16 +125,12 @@ export async function loginViaGrpc(
   password: string,
 ): Promise<AuthResult> {
   const client = createAuthClient(address);
-  try {
-    const response = await callUnary<{ email: string; password: string }, AuthResultWireMessage>(
-      client,
-      "Login",
-      { email, password },
-    );
-    return toAuthResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<{ email: string; password: string }, AuthResultWireMessage>(
+    client,
+    "Login",
+    { email, password },
+  );
+  return toAuthResult(response);
 }
 
 export async function getUserViaGrpc(
@@ -152,15 +138,11 @@ export async function getUserViaGrpc(
   userId: string,
 ): Promise<{ found: boolean; user: AuthUser | null }> {
   const client = createAuthClient(address);
-  try {
-    const response = await callUnary<
-      { user_id: string },
-      { found: boolean; user: UserWireMessage | null }
-    >(client, "GetUser", { user_id: userId });
-    return { found: response.found, user: response.user ? toAuthUser(response.user) : null };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { user_id: string },
+    { found: boolean; user: UserWireMessage | null }
+  >(client, "GetUser", { user_id: userId });
+  return { found: response.found, user: response.user ? toAuthUser(response.user) : null };
 }
 
 export async function validateOAuthUserViaGrpc(
@@ -168,29 +150,21 @@ export async function validateOAuthUserViaGrpc(
   params: { email: string; name?: string; provider: string; providerId: string },
 ): Promise<AuthResult> {
   const client = createAuthClient(address);
-  try {
-    const response = await callUnary<
-      { email: string; name: string; provider: string; provider_id: string },
-      AuthResultWireMessage
-    >(client, "ValidateOAuthUser", {
-      email: params.email,
-      name: params.name ?? "",
-      provider: params.provider,
-      provider_id: params.providerId,
-    });
-    return toAuthResult(response);
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { email: string; name: string; provider: string; provider_id: string },
+    AuthResultWireMessage
+  >(client, "ValidateOAuthUser", {
+    email: params.email,
+    name: params.name ?? "",
+    provider: params.provider,
+    provider_id: params.providerId,
+  });
+  return toAuthResult(response);
 }
 
 export async function forgotPasswordViaGrpc(address: string, email: string): Promise<void> {
   const client = createAuthClient(address);
-  try {
-    await callUnary<{ email: string }, { success: boolean }>(client, "ForgotPassword", { email });
-  } finally {
-    client.close();
-  }
+  await callUnary<{ email: string }, { success: boolean }>(client, "ForgotPassword", { email });
 }
 
 export async function resetPasswordViaGrpc(
@@ -199,13 +173,9 @@ export async function resetPasswordViaGrpc(
   newPassword: string,
 ): Promise<void> {
   const client = createAuthClient(address);
-  try {
-    await callUnary<{ token: string; new_password: string }, { success: boolean }>(
-      client,
-      "ResetPassword",
-      { token, new_password: newPassword },
-    );
-  } finally {
-    client.close();
-  }
+  await callUnary<{ token: string; new_password: string }, { success: boolean }>(
+    client,
+    "ResetPassword",
+    { token, new_password: newPassword },
+  );
 }

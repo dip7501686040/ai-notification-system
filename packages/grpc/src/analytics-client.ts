@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { loadProto } from "./proto";
 import { callUnary } from "./call-unary";
+import { getPooledClient } from "./channel-pool";
 
 export interface DailyEventCount {
   date: string;
@@ -73,10 +74,12 @@ interface GetObservabilityLinksWireResponse {
 }
 
 function createClient(address: string): grpc.Client {
-  const proto = loadProto("analytics.proto") as unknown as {
-    analytics: { v1: { Analytics: grpc.ServiceClientConstructor } };
-  };
-  return new proto.analytics.v1.Analytics(address, grpc.credentials.createInsecure());
+  return getPooledClient(`analytics:${address}`, () => {
+    const proto = loadProto("analytics.proto") as unknown as {
+      analytics: { v1: { Analytics: grpc.ServiceClientConstructor } };
+    };
+    return new proto.analytics.v1.Analytics(address, grpc.credentials.createInsecure());
+  });
 }
 
 export async function getDailyEventsViaGrpc(
@@ -86,19 +89,15 @@ export async function getDailyEventsViaGrpc(
   days?: number,
 ): Promise<DailyEventCount[]> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; days: number },
-      GetDailyEventsWireResponse
-    >(client, "GetDailyEvents", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      days: days ?? 0,
-    });
-    return response.list;
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; days: number },
+    GetDailyEventsWireResponse
+  >(client, "GetDailyEvents", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    days: days ?? 0,
+  });
+  return response.list;
 }
 
 export async function getTopSourcesViaGrpc(
@@ -109,20 +108,16 @@ export async function getTopSourcesViaGrpc(
   limit?: number,
 ): Promise<SourceCount[]> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; days: number; limit: number },
-      GetTopSourcesWireResponse
-    >(client, "GetTopSources", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      days: days ?? 0,
-      limit: limit ?? 0,
-    });
-    return response.list;
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; days: number; limit: number },
+    GetTopSourcesWireResponse
+  >(client, "GetTopSources", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    days: days ?? 0,
+    limit: limit ?? 0,
+  });
+  return response.list;
 }
 
 export async function getNotificationStatsViaGrpc(
@@ -132,30 +127,26 @@ export async function getNotificationStatsViaGrpc(
   days?: number,
 ): Promise<NotificationStats> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string; days: number },
-      GetNotificationStatsWireResponse
-    >(client, "GetNotificationStats", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-      days: days ?? 0,
-    });
-    return {
-      byChannel: response.by_channel.map((c) => ({
-        channel: c.channel,
-        sent: c.sent,
-        failed: c.failed,
-        estimatedCost: c.estimated_cost,
-      })),
-      totalSent: response.total_sent,
-      totalFailed: response.total_failed,
-      successRate: response.success_rate,
-      totalEstimatedCost: response.total_estimated_cost,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string; days: number },
+    GetNotificationStatsWireResponse
+  >(client, "GetNotificationStats", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+    days: days ?? 0,
+  });
+  return {
+    byChannel: response.by_channel.map((c) => ({
+      channel: c.channel,
+      sent: c.sent,
+      failed: c.failed,
+      estimatedCost: c.estimated_cost,
+    })),
+    totalSent: response.total_sent,
+    totalFailed: response.total_failed,
+    successRate: response.success_rate,
+    totalEstimatedCost: response.total_estimated_cost,
+  };
 }
 
 export async function getObservabilityLinksViaGrpc(
@@ -164,20 +155,16 @@ export async function getObservabilityLinksViaGrpc(
   tenantId: string,
 ): Promise<ObservabilityLinks> {
   const client = createClient(address);
-  try {
-    const response = await callUnary<
-      { requester_id: string; tenant_id: string },
-      GetObservabilityLinksWireResponse
-    >(client, "GetObservabilityLinks", {
-      requester_id: requesterId,
-      tenant_id: tenantId,
-    });
-    return {
-      metricsLogsUrl: response.metrics_logs_url,
-      tracesUrl: response.traces_url,
-      systemHealthUrl: response.system_health_url,
-    };
-  } finally {
-    client.close();
-  }
+  const response = await callUnary<
+    { requester_id: string; tenant_id: string },
+    GetObservabilityLinksWireResponse
+  >(client, "GetObservabilityLinks", {
+    requester_id: requesterId,
+    tenant_id: tenantId,
+  });
+  return {
+    metricsLogsUrl: response.metrics_logs_url,
+    tracesUrl: response.traces_url,
+    systemHealthUrl: response.system_health_url,
+  };
 }
