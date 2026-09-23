@@ -157,6 +157,20 @@ small node" — real horizontal spread across proper node capacity.
 **Resources**:
 
 - `loadtest/mainflow-open.js`, `loadtest/out/oci-baseline-open.json` (full k6 summary)
+- Screenshot: [grafana-oci-baseline-request-error-rate.png](screenshots/2026-09-23/grafana-oci-baseline-request-error-rate.png) — Platform Health dashboard, live request-rate ramp for the load-test tenant + flat 0% error rate
+
+**Problem**: User asked for screenshots to actually be captured going forward, not just referenced as a convention.
+**Solution**: Used the Playwright MCP browser to log into Jaeger and Grafana (both reached via
+`kubectl port-forward`) and capture real evidence images, saved under `.claude/screenshots/2026-09-23/`:
+one from each of the two verification steps done so far today. The Phase 0c gRPC-pooling trace
+evidence (previously only described in text) now has a matching screenshot — the original curl-based
+traces had already aged out of Jaeger's in-memory storage by the time this was requested, so it was
+regenerated fresh (3 new `GET /tenants` calls) rather than reconstructed from old data.
+**Resources**:
+
+- [jaeger-tenants-search-results.png](screenshots/2026-09-23/jaeger-tenants-search-results.png) — 3 fresh `GET /tenants` traces, 11–36ms total
+- [jaeger-trace-validatetoken-pooled-4.41ms.png](screenshots/2026-09-23/jaeger-trace-validatetoken-pooled-4.41ms.png) — full span waterfall, `grpc.auth.v1.Auth/ValidateToken` at 4.41ms (the pooled-channel evidence for Phase 0a/0c)
+- Note: the repo's own `loadtest/grafana-phaseF.json` dashboard has a broken `${DS_PROMETHEUS}` datasource binding (pre-existing, not caused by today's changes) — used the working "Platform Health" dashboard instead. Worth fixing before the AWS ladder phase so the purpose-built load-test dashboard is usable.
 - Next: Phase 1 onward — AWS budget, Terraform fixes, provision, then climb the 232 → 500 → 1000 →
-  2315 events/s ladder on real AWS, each rung proven with evidence before scaling to the next — see
-  [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
+  2315 events/s ladder on real AWS, each rung proven with evidence (including screenshots) before
+  scaling to the next — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
