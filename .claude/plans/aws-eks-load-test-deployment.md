@@ -92,6 +92,8 @@ Gated `module.network_backing_services`/`eks_backing_services`/`addons_backing_s
 
 Apply against real AWS with real credentials, verify EKS cluster comes up, `kubectl get nodes` works, then **immediately `terraform destroy`** before doing anything else — proving the full cycle works cleanly before ever leaving it up long enough to explore. First concrete lesson: prove teardown works _before_ trusting yourself to use the environment.
 
+**Standing rule from here on, every session, not just this one** (user's explicit instruction 2026-09-23, after the OCI incident where a leftover paid LB shape kept billing silently after a migration): after every `terraform destroy`, explicitly check AWS Cost Explorer / Billing (and a resource-level sanity pass — EC2, EBS volumes, EIPs, load balancers, NAT gateways) to confirm nothing is still accruing charges. `terraform destroy` exiting cleanly is necessary but not sufficient proof — verify against the account directly, same lesson as OCI.
+
 ### Phase 4 — Real session: deploy the (now-optimized) app
 
 Provision, push images to the now-real ECR (new GitHub Actions workflow or manual `docker push` for the first pass), deploy the 13 services + backing services including PgBouncer (fresh Helm installs, same charts as OCI/OKE, carrying the Phase 0 fixes forward — no chart logic changes needed beyond what Phase 0 already built, just new `aws-prod` values), verify healthy, verify the ALB URL reachable.
@@ -117,8 +119,8 @@ Once all four rungs are climbed (or the session's time/budget runs out — docum
 
 - After Phase 0: Jaeger shows measurably lower per-hop gRPC latency; `pg_stat_activity` connection count stays bounded under load instead of scaling with replica count. ✅ Done.
 - Phase 0.5: OCI baseline captured with real k6 + Prometheus evidence. ✅ Done.
-- After Phase 2: `terraform validate`/`plan` against `prod.tfvars` + `secrets.aws.tfvars` shows only the intended single-cluster resource set — no second VPC/EKS cluster in the plan.
-- After Phase 3: a full provision→`kubectl get nodes`→destroy cycle completes with the AWS Console showing zero EKS clusters, zero EC2 instances, zero load balancers afterward.
+- After Phase 2: `terraform validate`/`plan` against `prod.tfvars` + `secrets.aws.tfvars` shows only the intended single-cluster resource set — no second VPC/EKS cluster in the plan. ✅ Done.
+- After Phase 3 (and every AWS session after, standing rule): a full provision→`kubectl get nodes`→destroy cycle completes with the AWS Console showing zero EKS clusters, zero EC2 instances, zero load balancers afterward, **and** AWS Cost Explorer/Billing checked directly (not just inferred from `terraform destroy` exiting cleanly) to confirm nothing is still accruing charges.
 - After each Phase 5 rung: k6 summary shows the target rate cleanly met (errors within threshold, latency within threshold), with Grafana/Prometheus evidence of the replica/node count it took to get there — logged in `.claude/CONTENT.md` before moving to the next rung.
 - After the full ladder: a documented, evidence-backed comparison across all rungs (replica/node count vs. throughput achieved) plus the OCI baseline, and if 2315/s isn't fully reached, an honest evidence-backed explanation of exactly what stood in the way.
 - Every AWS session: a Budget alert never fires unexpectedly between sessions (would mean something wasn't torn down).
