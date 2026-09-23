@@ -47,9 +47,20 @@ The OCI/OKE deployment (done, live, $0/month) proved the GitOps/CI/HPA mechanics
 ## Architecture decisions for this pass
 
 - **Public subnets for worker nodes, no NAT Gateway.** This is a deliberately different call from OCI's private-subnet design: there, the cluster runs permanently and the security posture matters long-term. Here, the cluster exists for a few hours at a time and is destroyed immediately after — the NAT Gateway's $0.045/hr (plus data processing) buys security value that doesn't matter for a burst lab environment, and removing it simplifies the network module changes needed. Nodes get public IPs behind tight security groups (only the ALB's ports + your current IP for kubectl, same `/32` discipline as the OCI VCN).
-- **Node sizing driven by Phase 0.5's measured data, not a guess.** `t3.medium` as a starting shape (existing default), with `node_desired_size`/`max` raised beyond the current 2/3 — but the actual replica/node counts needed come from real measured per-pod CPU/memory under load (Phase 0.5), not an assumed number. Fine-tuned further live during the AWS load test itself, informed by whatever the first real run shows.
+- **Node/replica sizing driven live by the target ladder, not pre-computed.** `t3.medium` as a starting shape (existing default). Rather than deriving a fixed sizing number in advance, AWS provisioning starts at a small/cheap size and each rung of the target ladder (see "Target ladder" below) is climbed by scaling up (replicas via HPA/manual, nodes via `node_desired_size`) only as far as needed to hit that rung — so the scaling curve itself (replicas/nodes vs. throughput achieved) becomes the evidence, not just a single end-state sizing number.
 - **Region**: keep `us-east-1` (already default in `prod.tfvars`) — cheapest, most fully-featured region, and latency doesn't matter for a load test you're driving from a k6 run, not real users.
 - **Reuse what's already known**: OpenAI key, GitHub push token, JWT/Postgres/RabbitMQ password values already exist in `platform-infrastructure/oci/secrets.oci.tfvars` — copy forward into `secrets.aws.tfvars` rather than regenerating.
+
+## Target ladder (redirected 2026-09-23)
+
+Not a single AWS sizing exercise — a staged climb, each rung proven with real evidence before scaling to the next, within one continuous AWS session (re-provisioning between rungs would just waste the scaling-curve narrative):
+
+1. **232 events/s** — the SRS primary target.
+2. **500 events/s** — first checkpoint past primary.
+3. **1000 events/s** — second checkpoint.
+4. **2315 events/s** — the SRS stretch target.
+
+At each rung: run the k6 open-model test at that target rate, capture evidence (k6 summary JSON, Grafana/Prometheus screenshots showing replica count + per-pod resource usage + latency during the run), and only scale up (HPA/replica counts, node group size) if that rung isn't cleanly met. The **OCI baseline (9.6 req/s sustained, p95 333.96ms, captured 2026-09-23 — see `.claude/CONTENT.md`) is the "before" reference point**, not a sizing input — it exists to make the AWS scaling story concrete ("a single free-tier node tops out around 10/s; here's what real horizontal scaling achieves").
 
 ## Phased implementation (after approval)
 
@@ -63,17 +74,17 @@ The OCI/OKE deployment (done, live, $0/month) proved the GitOps/CI/HPA mechanics
 
 **0c. Ship + verify on OCI.** ✅ Done — both fixes pushed and deployed via the existing GitHub Actions → Docker Hub → ArgoCD pipeline (all 14 apps Synced+Healthy). **Verified with real traffic, not just a healthy-pod check**: logged into the live demo account at `https://ainotification-api.duckdns.org`, hit `GET /tenants` 8 times, pulled the resulting traces from Jaeger. `grpc.auth.v1.Auth/ValidateToken` (the hottest path — runs on every authenticated request via `grpc-auth.guard.ts`) averaged **6.5ms per call (range 5.3–10.4ms)**, down from the previously-measured 100–500ms/hop for a fresh channel — a ~20–75x drop, exactly matching the pooled-channel prediction. Separately confirmed PgBouncer structurally: `pg_stat_activity` on Postgres shows exactly 9 backend connections (one per logical database), all from PgBouncer's single pod IP rather than from each service directly; `SHOW POOLS` confirms `pool_mode: transaction` active on all 9. (Proving the connection count _stays_ flat as replica count grows needs real load — that's Phase 0.5 below, not re-provable at today's idle 1-replica baseline.)
 
-### Phase 0.5 — Evidence-based sizing (still on OCI, still $0)
+### Phase 0.5 — OCI baseline evidence ✅ Done ($0, no AWS touched)
 
-Re-run the existing k6 scripts (`loadtest/mainflow-open.js`/`mainflow-closed.js`) against the now-fixed OCI deployment. Use Prometheus's real per-pod CPU/memory data (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`) — captured before and after the Phase 0 fixes, a genuine quantified before/after artifact — to derive actual measured resource requests/limits, replacing the original guessed `30-50m/96-256Mi` Helm defaults. These measured numbers become the basis for the AWS node/pod sizing in Phase 2, not another guess.
+Not a sizing exercise (superseded — see "Target ladder" above). Ran `loadtest/mainflow-open.js` against the live, now-fixed OCI deployment purely to capture a "before" reference point. Result: **9.6 req/s sustained, 0% errors, p95 latency 333.96ms** (crossed the 300ms threshold — found the edge), and critically, Prometheus showed **no single pod above 57m CPU** even at peak — the ceiling here is aggregate contention across ~16 pods sharing one 2-OCPU node, not per-pod CPU exhaustion. Full writeup in `.claude/CONTENT.md` (2026-09-23). This number is the "before" side of the AWS scaling story, not an input to AWS sizing math.
 
 ### Phase 1 — AWS account safety net
 
 Set up AWS Budgets + an escalating alert ladder (same shape as the OCI one: e.g. $5/$10/$25/$50/$100 thresholds on both ACTUAL and FORECASTED), confirmed email subscription. Can happen any time before the first real AWS apply.
 
-### Phase 2 — Fix the AWS Terraform, apply evidence-based sizing
+### Phase 2 — Fix the AWS Terraform, start at a small baseline size
 
-Remove the unconditional `backing_services`/`jenkins`/`argocd`/`observability` cluster blocks from `main.tf`'s real-AWS path (the bug above). Adjust `modules/network` for public-subnet-only nodes (drop NAT Gateway resources, or gate them off). Create `secrets.aws.tfvars`. Set `envs/prod.tfvars` node sizing and Helm resource requests/limits from Phase 0.5's real measurements, not the original guesses.
+Remove the unconditional `backing_services`/`jenkins`/`argocd`/`observability` cluster blocks from `main.tf`'s real-AWS path (the bug above). Adjust `modules/network` for public-subnet-only nodes (drop NAT Gateway resources, or gate them off). Create `secrets.aws.tfvars`. Leave `envs/prod.tfvars` node sizing at a small/cheap starting point (e.g. 2× `t3.medium`) — the ladder in Phase 5 is what determines how far this needs to grow, not a pre-computed number.
 
 ### Phase 3 — First provision + teardown rehearsal
 
@@ -83,22 +94,31 @@ Apply against real AWS with real credentials, verify EKS cluster comes up, `kube
 
 Provision, push images to the now-real ECR (new GitHub Actions workflow or manual `docker push` for the first pass), deploy the 13 services + backing services including PgBouncer (fresh Helm installs, same charts as OCI/OKE, carrying the Phase 0 fixes forward — no chart logic changes needed beyond what Phase 0 already built, just new `aws-prod` values), verify healthy, verify the ALB URL reachable.
 
-### Phase 5 — HPA/KEDA + real load test
+### Phase 5 — Climb the target ladder, one rung at a time
 
-Apply `loadtest/hpa/api-gateway.yaml` and `loadtest/keda/channel-service.yaml` (KEDA installed fresh here too), run the k6 scripts at real target rates, watch it scale. Because the two architectural bottlenecks are already fixed, this run should get meaningfully further than node-count-alone ever could — capture Grafana/dashboard evidence of the before/after gain (both the OCI-vs-AWS jump AND the pre-fix-vs-post-fix jump), the genuine deliverable.
+Install HPA/KEDA (`loadtest/hpa/api-gateway.yaml`, `loadtest/keda/channel-service.yaml`). Then, for each rung in the target ladder (232 → 500 → 1000 → 2315 events/s):
 
-### Phase 6 — Evidence capture, then destroy
+1. Run `mainflow-open.js` (or a variant tuned to that target rate) against the AWS ALB URL.
+2. Capture evidence for that rung: k6 summary JSON, Grafana/Prometheus screenshots (replica count, per-pod CPU/memory, latency percentiles during the run), current node count.
+3. If the rung wasn't cleanly met (error rate, latency thresholds, or throughput itself falls short), scale up — HPA max replicas, manual replica counts, or `node_desired_size` — and re-run the same rung until it's met.
+4. Log the rung's result in `.claude/CONTENT.md` (target, achieved throughput, replica/node count, evidence links) before moving to the next rung.
 
-Screenshots/exports of the scaling proof, then `terraform destroy` the same session, confirmed via the AWS Console/CLI that nothing's left running.
+Because the two architectural bottlenecks are already fixed, each rung should need meaningfully less scaling than raw node-count-alone would have — that contrast (OCI baseline vs. each AWS rung) is the real deliverable, not just "2315/s was reached."
 
-**Repeat Phases 4-6** as many times as useful over the coming weeks — each a clean provision→learn→evidence→destroy cycle, informed by what the previous run showed.
+### Phase 6 — Final evidence capture, then destroy
+
+Once all four rungs are climbed (or the session's time/budget runs out — document honestly which rungs were reached and what stood between the last one and 2315/s if it wasn't fully hit), pull together the full evidence set, then `terraform destroy` the same session, confirmed via the AWS Console/CLI that nothing's left running.
+
+**Repeat Phases 4-6** across multiple sessions if the full ladder isn't climbed in one sitting — each session picks up from the last rung proven, informed by what the previous run showed.
 
 ## Verification criteria
 
-- After Phase 0: Jaeger shows measurably lower per-hop gRPC latency; `pg_stat_activity` connection count stays bounded under load instead of scaling with replica count.
+- After Phase 0: Jaeger shows measurably lower per-hop gRPC latency; `pg_stat_activity` connection count stays bounded under load instead of scaling with replica count. ✅ Done.
+- Phase 0.5: OCI baseline captured with real k6 + Prometheus evidence. ✅ Done.
 - After Phase 2: `terraform validate`/`plan` against `prod.tfvars` + `secrets.aws.tfvars` shows only the intended single-cluster resource set — no second VPC/EKS cluster in the plan.
 - After Phase 3: a full provision→`kubectl get nodes`→destroy cycle completes with the AWS Console showing zero EKS clusters, zero EC2 instances, zero load balancers afterward.
-- After Phase 5: Grafana (or CLI fallback) shows a real before/after replica-count and latency change across the HPA/KEDA scale event, at meaningfully higher throughput than both the OCI single-node ceiling AND the pre-Phase-0 architecture ever allowed — and a documented, evidence-backed explanation of exactly what stands between the achieved number and the 2315/s stretch target.
+- After each Phase 5 rung: k6 summary shows the target rate cleanly met (errors within threshold, latency within threshold), with Grafana/Prometheus evidence of the replica/node count it took to get there — logged in `.claude/CONTENT.md` before moving to the next rung.
+- After the full ladder: a documented, evidence-backed comparison across all rungs (replica/node count vs. throughput achieved) plus the OCI baseline, and if 2315/s isn't fully reached, an honest evidence-backed explanation of exactly what stood in the way.
 - Every AWS session: a Budget alert never fires unexpectedly between sessions (would mean something wasn't torn down).
 
 ## Follow-ons (out of scope for this pass)

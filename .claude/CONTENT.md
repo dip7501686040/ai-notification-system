@@ -136,6 +136,27 @@ baseline — but the mechanism is confirmed wired up correctly.
 
 - Jaeger UI: `kubectl port-forward -n observability svc/jaeger 16686:16686`, service `api-gateway`
 - `apps/api-gateway/src/auth/grpc-auth.guard.ts` (the traced call path)
-- Phase 0 (gRPC pooling + PgBouncer) is now fully shipped and verified on OCI. Next up: Phase 0.5 —
-  re-run k6 load tests against this fixed deployment and derive real AWS sizing from measured
-  Prometheus data — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
+- Phase 0 (gRPC pooling + PgBouncer) is now fully shipped and verified on OCI.
+
+**Problem**: User redirected the plan: instead of using an OCI k6 run to _derive_ AWS sizing math,
+they want a preset target ladder (232 → 500 → 1000 → 2315 events/s, the SRS primary/stretch numbers
+plus two checkpoints) climbed and proven with evidence one at a time on real AWS — but still wanted
+an OCI baseline captured now, purely as a "before" data point for the portfolio story, not for sizing.
+**Solution**: Fixed a local blocker first — `k6` couldn't connect at all (`dial: bad file descriptor`,
+only for k6, not `curl`), which turned out to be LuLu (the outbound firewall from the malware-cleanup
+hardening) never having been prompted/allowed for the `k6` binary; allowed it and retried. Then ran
+`loadtest/mainflow-open.js` (the existing open-model ramp: 2→20 req/s over ~3.5min) against the live
+`https://ainotification-api.duckdns.org`.
+**Real baseline result**: **9.6 req/s sustained** (1933 requests, 0% errors), **p95 latency 333.96ms**
+(crossed the 300ms threshold — this is the free-tier node finding its edge), avg 119ms. Cross-checked
+against Prometheus: no single pod exceeded **57m CPU** even at the ramp's peak (api-gateway highest at
+57m, most services under 30m) — meaning the ceiling here is **not** per-pod CPU exhaustion, it's
+aggregate contention across ~16 co-located pods sharing one 2-OCPU node. Useful, honest finding: the
+fix that will matter on AWS isn't "give services more CPU each", it's "stop cramming 16 pods onto one
+small node" — real horizontal spread across proper node capacity.
+**Resources**:
+
+- `loadtest/mainflow-open.js`, `loadtest/out/oci-baseline-open.json` (full k6 summary)
+- Next: Phase 1 onward — AWS budget, Terraform fixes, provision, then climb the 232 → 500 → 1000 →
+  2315 events/s ladder on real AWS, each rung proven with evidence before scaling to the next — see
+  [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
