@@ -116,3 +116,26 @@ recovered on its own within seconds, no restart needed.
 
 - `platform-gitops/k8s/charts/backing-services/templates/pgbouncer.yaml` (`LISTEN_PORT`)
 - Commit `8307600` (platform-gitops)
+
+**Problem**: All 14 ArgoCD apps reached Synced+Healthy (via the RollingSync ApplicationSet wave, ~7
+minutes end to end, no manual intervention needed beyond the pgbouncer fix above) — final step was
+proving Phase 0a+0b actually work with real traffic, not just "it deployed".
+**Solution**: Logged in as the demo account (`proof-demo@dipankarsaha.dev`) against the live
+`https://ainotification-api.duckdns.org`, then hit `GET /tenants` (goes through
+`grpc-auth.guard.ts`'s `validateTokenViaGrpc` on every call) 8 times. Pulled the resulting traces
+from Jaeger: **`grpc.auth.v1.Auth/ValidateToken` client-side span averaged 6.5ms (range 5.3–10.4ms)
+across all 8 calls** — down from the previously-documented 100–500ms/hop for a fresh channel, a
+~20–75x drop, exactly matching the pooled-channel prediction. Separately confirmed the PgBouncer fix
+structurally: `pg_stat_activity` on Postgres shows exactly 9 backend connections (one per logical
+database), all originating from a single `client_addr` (PgBouncer's pod IP) rather than from each
+service directly — `SHOW POOLS` on PgBouncer's admin console confirms `pool_mode: transaction` is
+active for all 9 databases. Full proof of "connection count stays flat as replica count grows" needs
+real load (Phase 0.5's k6 run with HPA scaling replicas up), not provable at today's idle 1-replica
+baseline — but the mechanism is confirmed wired up correctly.
+**Resources**:
+
+- Jaeger UI: `kubectl port-forward -n observability svc/jaeger 16686:16686`, service `api-gateway`
+- `apps/api-gateway/src/auth/grpc-auth.guard.ts` (the traced call path)
+- Phase 0 (gRPC pooling + PgBouncer) is now fully shipped and verified on OCI. Next up: Phase 0.5 —
+  re-run k6 load tests against this fixed deployment and derive real AWS sizing from measured
+  Prometheus data — see [.claude/plans/aws-eks-load-test-deployment.md](plans/aws-eks-load-test-deployment.md)
