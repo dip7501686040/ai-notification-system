@@ -138,12 +138,14 @@ jobs:
           path: platform-gitops
           persist-credentials: false
 
-      # GitHub-hosted runners are amd64; the OKE deployment target is an
-      # Ampere A1 (arm64) node. Without this, docker/build-push-action
-      # produces amd64-only images that fail at container start with
-      # "exec format error" on the arm64 node -- confirmed live on the
-      # first real deploy attempt. QEMU lets the amd64 runner cross-build
-      # for arm64.
+      # GitHub-hosted runners are amd64 natively -- QEMU is only needed
+      # here for the non-native arm64 leg of the multi-platform build
+      # below (OCI's Ampere A1 nodes). Without it, a single-platform
+      # build produces amd64-only images that fail at container start
+      # with "exec format error" on an arm64 node -- confirmed live on
+      # the first real OCI deploy attempt, and again the inverse way
+      # (arm64-only images on AWS's x86_64 nodes) on the first real AWS
+      # deploy attempt, which is what made this multi-arch build necessary.
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
@@ -193,7 +195,14 @@ jobs:
         with:
           context: ${{ steps.params.outputs.context }}
           file: ${{ steps.params.outputs.dockerfile }}
-          platforms: linux/arm64
+          # Multi-arch: linux/arm64 for OCI's Ampere A1 nodes, linux/amd64
+          # for AWS's node types (the account's Free Tier vCPU-quota-
+          # eligible instance types are all x86_64 except two very small
+          # Graviton ones -- see platform-infrastructure's envs/prod.tfvars
+          # comment). buildx/BuildKit produces one manifest list per tag
+          # that both platforms resolve correctly on their own, no
+          # per-target image duplication needed.
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.params.outputs.image }}
           build-args: ${{ steps.params.outputs.build-args }}
