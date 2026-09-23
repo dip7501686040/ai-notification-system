@@ -13,11 +13,11 @@ on:
       services:
         description: 'Comma-separated service names, or "all"'
         required: false
-        default: ''
+        default: ""
       web_api_url:
-        description: 'Override NEXT_PUBLIC_API_URL for the web image'
+        description: "Override NEXT_PUBLIC_API_URL for the web image"
         required: false
-        default: ''
+        default: ""
 
 concurrency:
   group: build-and-push
@@ -75,11 +75,28 @@ jobs:
             else
               corepack enable
               DRY=$(pnpm dlx turbo@^2.3.0 run build --filter="...[${BASE_SHA}]" --dry=json)
-              RAW=$(echo "$DRY" | jq -r '[.packages[] | select(. != "//") | sub("^@ai-notification/"; "")] | join(",")')
+              # Turborepo's dependency graph includes every affected
+              # workspace package, not just deployable ones -- a change
+              # isolated to a shared packages/* library (e.g. packages/grpc)
+              # correctly marks every service that depends on it, but also
+              # includes that shared package's own name, which has no
+              # Dockerfile/catalog entry and was never meant to be built
+              # directly. Confirmed live: an isolated packages/grpc change
+              # produced a spurious "grpc" matrix entry that failed with a
+              # null Dockerfile path even though every real dependent
+              # service built and pushed fine. Filtered against the catalog
+              # here so only actual buildable services ever reach the matrix.
+              RAW=$(echo "$DRY" | jq -r --slurpfile catalog "$CATALOG" '
+                [.packages[] | select(. != "//") | sub("^@ai-notification/"; "")]
+                | map(select(. as $s | $catalog[0] | has($s)))
+                | join(",")
+              ')
               # RAW may legitimately be empty here -- Turborepo found real
               # changes but none of them touch any service (e.g. only
-              # .github/* or docs changed). That means build nothing, NOT
-              # build everything -- don't fall back to ALL_SERVICES.
+              # .github/* or docs changed, or only a non-catalog shared
+              # package with no service depending on it). That means build
+              # nothing, NOT build everything -- don't fall back to
+              # ALL_SERVICES.
             fi
           fi
 
